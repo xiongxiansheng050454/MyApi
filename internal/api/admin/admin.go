@@ -13,12 +13,6 @@ var placeholderRoutes = []route{
 	{"GET", "/pricing", "查询单价"},
 	{"DELETE", "/pricing", "删除单价"},
 
-	{"POST", "/rate-limits", "创建限流规则"},
-	{"GET", "/rate-limits", "规则列表"},
-	{"GET", "/rate-limits/:ruleId", "规则详情"},
-	{"PUT", "/rate-limits/:ruleId", "更新规则"},
-	{"DELETE", "/rate-limits/:ruleId", "删除规则"},
-
 	{"GET", "/usage-logs", "请求日志列表"},
 	{"GET", "/usage-logs/:logId", "请求日志详情"},
 	{"GET", "/stats/daily", "用户日汇总"},
@@ -56,6 +50,12 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/users/:userId/keys/:keyId/reset", h.resetKey)
 	rg.DELETE("/users/:userId/keys/:keyId", h.deleteKey)
 	rg.GET("/keys", h.listKeys)
+
+	rg.POST("/rate-limits", h.createRateRule)
+	rg.GET("/rate-limits", h.listRateRules)
+	rg.GET("/rate-limits/:ruleId", h.getRateRule)
+	rg.PUT("/rate-limits/:ruleId", h.updateRateRule)
+	rg.DELETE("/rate-limits/:ruleId", h.deleteRateRule)
 
 	notImplemented := func(summary string) gin.HandlerFunc {
 		return func(c *gin.Context) {
