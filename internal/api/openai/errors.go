@@ -38,6 +38,8 @@ func writeServiceError(c *gin.Context, err error) {
 		writeOpenAIError(c, http.StatusForbidden, "account_suspended", "permission_error", "The account is suspended.")
 	case errors.Is(err, service.ErrModelNotFound):
 		writeOpenAIError(c, http.StatusNotFound, "model_not_found", "invalid_request_error", "The model does not exist.")
+	case errors.Is(err, service.ErrNoHealthyUpstream):
+		writeOpenAIError(c, http.StatusBadGateway, "upstream_error", "server_error", "All upstream channels are unavailable.")
 	case errors.Is(err, service.ErrStoreDown):
 		writeOpenAIError(c, http.StatusServiceUnavailable, "internal_error", "server_error", "Gateway backend unavailable.")
 	case errors.Is(err, service.ErrNotImplemented):

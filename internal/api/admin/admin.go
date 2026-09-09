@@ -1,18 +1,6 @@
 package admin
 
-import (
-	"log/slog"
-
-	"github.com/gin-gonic/gin"
-)
-
-type Handler struct {
-	log *slog.Logger
-}
-
-func New(log *slog.Logger) *Handler {
-	return &Handler{log: log}
-}
+import "github.com/gin-gonic/gin"
 
 type route struct {
 	method  string
@@ -20,35 +8,7 @@ type route struct {
 	summary string
 }
 
-var routes = []route{
-	{"POST", "/users", "创建下游用户"},
-	{"GET", "/users", "用户列表"},
-	{"GET", "/users/:userId", "用户详情"},
-	{"PUT", "/users/:userId", "更新用户"},
-	{"PUT", "/users/:userId/status", "变更用户状态"},
-	{"GET", "/users/:userId/balance", "查询余额"},
-	{"POST", "/users/:userId/recharge", "充值"},
-	{"GET", "/users/:userId/balance-transactions", "资金流水"},
-	{"GET", "/users/:userId/keys", "Key 列表"},
-	{"POST", "/users/:userId/keys", "创建 Key"},
-	{"PUT", "/users/:userId/keys/:keyId", "更新 Key"},
-	{"POST", "/users/:userId/keys/:keyId/reset", "重置 Key"},
-	{"DELETE", "/users/:userId/keys/:keyId", "删除 Key"},
-	{"GET", "/keys", "Key 全局检索"},
-
-	{"POST", "/channels", "创建上游渠道"},
-	{"GET", "/channels", "渠道列表"},
-	{"GET", "/channels/:channelId", "渠道详情"},
-	{"PUT", "/channels/:channelId", "更新渠道"},
-	{"PUT", "/channels/:channelId/status", "启停渠道"},
-	{"DELETE", "/channels/:channelId", "删除渠道"},
-	{"POST", "/channels/:channelId/test", "渠道连通性测试"},
-	{"GET", "/channels/:channelId/models", "模型映射列表"},
-	{"POST", "/channels/:channelId/models", "添加模型映射"},
-	{"PUT", "/channels/:channelId/models/:modelId", "更新模型映射"},
-	{"DELETE", "/channels/:channelId/models/:modelId", "删除模型映射"},
-	{"GET", "/models", "对外发布模型目录"},
-
+var placeholderRoutes = []route{
 	{"POST", "/pricing", "设置/覆盖单价"},
 	{"GET", "/pricing", "查询单价"},
 	{"DELETE", "/pricing", "删除单价"},
@@ -67,13 +27,43 @@ var routes = []route{
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
+	rg.POST("/channels", h.createChannel)
+	rg.GET("/channels", h.listChannels)
+	rg.GET("/channels/:channelId", h.getChannel)
+	rg.PUT("/channels/:channelId", h.updateChannel)
+	rg.PUT("/channels/:channelId/status", h.setChannelStatus)
+	rg.DELETE("/channels/:channelId", h.deleteChannel)
+	rg.POST("/channels/:channelId/test", h.testChannel)
+	rg.POST("/channels/:channelId/remote-models", h.channelRemoteModels)
+	rg.POST("/remote-models", h.previewRemoteModels)
+	rg.GET("/channels/:channelId/models", h.listChannelModels)
+	rg.POST("/channels/:channelId/models", h.addChannelModel)
+	rg.PUT("/channels/:channelId/models/:modelId", h.updateChannelModel)
+	rg.DELETE("/channels/:channelId/models/:modelId", h.deleteChannelModel)
+	rg.GET("/models", h.modelCatalog)
+
+	rg.POST("/users", h.createUser)
+	rg.GET("/users", h.listUsers)
+	rg.GET("/users/:userId", h.getUser)
+	rg.PUT("/users/:userId", h.updateUser)
+	rg.PUT("/users/:userId/status", h.setUserStatus)
+	rg.GET("/users/:userId/balance", h.getUserBalance)
+	rg.POST("/users/:userId/recharge", h.recharge)
+	rg.GET("/users/:userId/balance-transactions", h.listBalanceTransactions)
+	rg.POST("/users/:userId/keys", h.createKey)
+	rg.GET("/users/:userId/keys", h.listUserKeys)
+	rg.PUT("/users/:userId/keys/:keyId", h.updateKey)
+	rg.POST("/users/:userId/keys/:keyId/reset", h.resetKey)
+	rg.DELETE("/users/:userId/keys/:keyId", h.deleteKey)
+	rg.GET("/keys", h.listKeys)
+
 	notImplemented := func(summary string) gin.HandlerFunc {
 		return func(c *gin.Context) {
 			h.log.Warn("admin endpoint not implemented", "path", c.Request.URL.Path, "summary", summary)
 			Fail(c, CodeNotImplemented, "接口未实现（骨架阶段）: "+summary)
 		}
 	}
-	for _, r := range routes {
+	for _, r := range placeholderRoutes {
 		rg.Handle(r.method, r.path, notImplemented(r.summary))
 	}
 }
