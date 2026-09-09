@@ -21,6 +21,19 @@ redis:
   password: ""
   db: 0
 
+upstream:
+  cache_ttl_seconds: 3        # 渠道快照刷新间隔(多节点收敛窗口, 越短一致越快)
+  retire_grace_seconds: 600   # 退役渠道强制回收宽限(在途请求最长存活)
+  events_channel: "myapi:channel:events"
+  breaker_max_requests: 1     # 半开探测放行数
+  breaker_interval_seconds: 0 # 熔断计数周期, 0=不按周期重置
+  breaker_timeout_seconds: 30 # Open->HalfOpen 等待
+  breaker_consecutive_failures: 5  # 连续失败达到该值触发熔断
+  max_forward_attempts: 2    # 转发失败可尝试的上游渠道次数
+  health_timeout_seconds: 8  # /test 健康检查单次硬超时
+  dial_timeout_seconds: 5    # 上游建连超时
+  tls_handshake_timeout_seconds: 5
+
 log:
   level: info            # debug / info / warn / error
   format: text           # text / json

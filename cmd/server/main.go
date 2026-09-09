@@ -51,11 +51,13 @@ func main() {
 	}
 
 	svc := service.New(st, log, cfg)
+	svc.Start()
+	defer svc.Shutdown()
 
 	engine := router.New(cfg, svc, log)
 	openaiHandler := openai.New(svc)
 	openaiHandler.Register(engine.Group("/v1"))
-	adminHandler := admin.New(log)
+	adminHandler := admin.New(svc)
 	adminHandler.Register(engine.Group("/admin"))
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

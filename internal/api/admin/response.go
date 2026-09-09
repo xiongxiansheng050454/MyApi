@@ -2,15 +2,7 @@ package admin
 
 import "github.com/gin-gonic/gin"
 
-const (
-	CodeOK             = 0
-	CodeParamError     = 10000
-	CodeNotFound       = 10002
-	CodeConflict       = 10003
-	CodeForbiddenState = 10004
-	CodeInternal       = 10005
-	CodeNotImplemented = 99999
-)
+const CodeOK = 0
 
 type response struct {
 	Code    int    `json:"code"`

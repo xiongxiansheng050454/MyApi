@@ -52,21 +52,61 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 
 	h.log.Debug("chat completion", "user_id", ident.UserID, "api_key_id", ident.ApiKeyID, "model", model)
 
-	if err := h.svc.ChatCompletion(c.Request.Context(), &service.ChatCompletionRequest{
+	resp, err := h.svc.ChatCompletion(c.Request.Context(), &service.ChatCompletionRequest{
 		Key: ident, Model: model, Body: body,
-	}); err != nil {
+	})
+	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
-	writeServiceError(c, service.ErrNotImplemented)
+	if resp == nil {
+		writeOpenAIError(c, http.StatusInternalServerError, "internal_error", "server_error", "Internal server error.")
+		return
+	}
+	defer resp.Close()
+
+	ct := resp.ContentType
+	if ct == "" {
+		ct = "application/json"
+	}
+	c.Status(resp.StatusCode)
+	c.Header("Content-Type", ct)
+
+	if strings.Contains(ct, "text/event-stream") {
+		streamCopy(c.Writer, resp.Body())
+		return
+	}
+	_, _ = io.Copy(c.Writer, resp.Body())
+}
+
+func streamCopy(w gin.ResponseWriter, src io.Reader) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		_, _ = io.Copy(w, src)
+		return
+	}
+	buf := make([]byte, 4*1024)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			_, werr := w.Write(buf[:n])
+			flusher.Flush()
+			if werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func bearerToken(c *gin.Context) (string, bool) {
-	h := c.GetHeader("Authorization")
-	if h == "" {
+	header := c.GetHeader("Authorization")
+	if header == "" {
 		return "", false
 	}
-	parts := strings.SplitN(h, " ", 2)
+	parts := strings.SplitN(header, " ", 2)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
 		return "", false
 	}
