@@ -8,11 +8,17 @@ import (
 )
 
 type Config struct {
-	Server   Server   `yaml:"server"`
-	Database Database `yaml:"database"`
-	Redis    Redis    `yaml:"redis"`
-	Upstream Upstream `yaml:"upstream"`
-	Log      Log      `yaml:"log"`
+	Server    Server    `yaml:"server"`
+	Database  Database  `yaml:"database"`
+	Redis     Redis     `yaml:"redis"`
+	Upstream  Upstream  `yaml:"upstream"`
+	RateLimit RateLimit `yaml:"rate_limit"`
+	Log       Log       `yaml:"log"`
+}
+
+type RateLimit struct {
+	CacheTTLSeconds int `yaml:"cache_ttl_seconds"`
+	CharsPerToken   int `yaml:"chars_per_token"`
 }
 
 type Server struct {
@@ -82,7 +88,8 @@ func Default() *Config {
 			DialTimeoutSeconds:         5,
 			TLSHandshakeTimeoutSeconds: 5,
 		},
-		Log: Log{Level: "info", Format: "text"},
+		RateLimit: RateLimit{CacheTTLSeconds: 2, CharsPerToken: 4},
+		Log:       Log{Level: "info", Format: "text"},
 	}
 }
 

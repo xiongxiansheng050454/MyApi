@@ -29,3 +29,10 @@ const (
 	CodeKeyPrefixInvalid  = 10202
 	CodeUserSuspended     = 10203
 )
+
+const (
+	CodeRateRuleNotFound        = 40000
+	CodeRateInvalidTargetType   = 40001
+	CodeRateInvalidValue        = 40002
+	CodeRateQueueTimeoutMissing = 40003
+)
