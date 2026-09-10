@@ -14,6 +14,8 @@ import (
 
 func round8(v float64) float64 { return math.Round(v*1e8) / 1e8 }
 
+func roundMicro(v float64) int64 { return int64(math.Round(v * 1e8)) }
+
 func strPtr(s string) *string {
 	if s == "" {
 		return nil

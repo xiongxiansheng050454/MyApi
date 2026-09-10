@@ -54,14 +54,24 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 
 	h.log.Debug("chat completion", "user_id", ident.UserID, "api_key_id", ident.ApiKeyID, "model", model)
 
-	resp, err := h.svc.ChatCompletion(c.Request.Context(), &service.ChatCompletionRequest{
+	creq := &service.ChatCompletionRequest{
 		Key:       ident,
 		Model:     model,
 		Body:      body,
 		RequestID: c.GetString("request_id"),
 		ClientIP:  c.ClientIP(),
 		StartedAt: time.Now(),
-	})
+	}
+
+	if streamFlag(body) {
+		sw := &ginStreamWriter{c: c}
+		if err := h.svc.ChatCompletionStream(c.Request.Context(), creq, sw); err != nil && !sw.started {
+			writeServiceError(c, err)
+		}
+		return
+	}
+
+	resp, err := h.svc.ChatCompletion(c.Request.Context(), creq)
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -78,35 +88,28 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 	}
 	c.Status(resp.StatusCode)
 	c.Header("Content-Type", ct)
-
-	if strings.Contains(ct, "text/event-stream") {
-		streamCopy(c.Writer, resp.Body())
-		return
-	}
 	_, _ = io.Copy(c.Writer, resp.Body())
 }
 
-func streamCopy(w gin.ResponseWriter, src io.Reader) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		_, _ = io.Copy(w, src)
+type ginStreamWriter struct {
+	c       *gin.Context
+	started bool
+}
+
+func (g *ginStreamWriter) Header(status int, contentType string) {
+	if g.started {
 		return
 	}
-	buf := make([]byte, 4*1024)
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			_, werr := w.Write(buf[:n])
-			flusher.Flush()
-			if werr != nil {
-				return
-			}
-		}
-		if err != nil {
-			return
-		}
+	g.c.Status(status)
+	if contentType != "" {
+		g.c.Header("Content-Type", contentType)
 	}
+	g.started = true
 }
+
+func (g *ginStreamWriter) Write(p []byte) (int, error) { return g.c.Writer.Write(p) }
+
+func (g *ginStreamWriter) Flush() { g.c.Writer.Flush() }
 
 func bearerToken(c *gin.Context) (string, bool) {
 	header := c.GetHeader("Authorization")
