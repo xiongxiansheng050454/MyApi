@@ -25,7 +25,7 @@ func (s *DBSource) Load(ctx context.Context) (*Snapshot, error) {
 
 	var channels []model.Channel
 	if err := s.db.WithContext(ctx).
-		Select("id", "name", "base_url", "auth_type", "weight", "priority").
+		Select("id", "name", "base_url", "auth_type", "weight", "priority", "balance").
 		Where("status = ?", 1).
 		Find(&channels).Error; err != nil {
 		return nil, err
@@ -39,6 +39,7 @@ func (s *DBSource) Load(ctx context.Context) (*Snapshot, error) {
 			AuthType: c.AuthType,
 			Weight:   c.Weight,
 			Priority: c.Priority,
+			Balance:  c.Balance,
 		}
 	}
 

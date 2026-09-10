@@ -16,6 +16,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/channels/:channelId", h.getChannel)
 	rg.PUT("/channels/:channelId", h.updateChannel)
 	rg.PUT("/channels/:channelId/status", h.setChannelStatus)
+	rg.PUT("/channels/:channelId/balance", h.setChannelBalance)
 	rg.DELETE("/channels/:channelId", h.deleteChannel)
 	rg.POST("/channels/:channelId/test", h.testChannel)
 	rg.POST("/channels/:channelId/remote-models", h.channelRemoteModels)

@@ -60,6 +60,8 @@ func New(st *store.Store, log *slog.Logger, cfg *config.Config) *Service {
 		BreakerInterval:            sec(uc.BreakerIntervalSeconds),
 		BreakerTimeout:             sec(uc.BreakerTimeoutSeconds),
 		BreakerConsecutiveFailures: uc.BreakerConsecutiveFailures,
+		FilterExhaustedChannels:    cfg.Routing.FilterExhaustedChannels,
+		LowBalanceThreshold:        cfg.Routing.LowBalanceThreshold,
 	}
 
 	var src channelmanager.Source

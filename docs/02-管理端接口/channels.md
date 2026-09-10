@@ -35,6 +35,7 @@
 | `status` | int | 否 | `1` | `1` 启用 / `0` 停用                                                   |
 | `weight` | int | 否 | `100` | 负载均衡权重（同优先级渠道间按比例分配）                                              |
 | `priority` | int | 否 | `0` | 路由优先级（数值越大越优先）；高优先级渠道不健康时才用低优先级                                   |
+| `balance` | string | 否 | null | 渠道剩余额度（USD，≤8 位小数）；**不传 = 不限**（不参与余额筛选）                            |
 
 响应 `data`：
 
@@ -49,6 +50,8 @@
   "status": 1,
   "weight": 100,
   "priority": 0,
+  "balance": "100.00000000",
+  "balance_updated_at": "2026-09-08T02:00:00Z",
   "created_at": "2026-09-08T02:00:00Z"
 }
 ```
@@ -164,6 +167,30 @@
 ```
 
 失败时 `ok=false`、`error` 描述原因（鉴权失败 / 超时 / 未迁移明文等）。
+
+### 1.9 调整渠道余额
+
+`PUT /admin/channels/{channelId}/balance`
+
+渠道余额用于**本地估算**（上游不一定提供查询）：创建时设初值，之后每笔结算按网关计算费用自动扣减；管理员定期核对上游账单后调整。
+
+覆盖（设为绝对值）：
+
+```json
+{ "balance": "100.00", "description": "月初充值核对" }
+```
+
+增减（delta 可为负）：
+
+```json
+{ "delta": "-12.34", "description": "扣减对账差额" }
+```
+
+- `balance`：`>= 0`，覆盖当前余额；`delta`：任意数值，在当前余额上增减（`null` 视为 0）。
+- 调整后写 `balance_updated_at` 并触发运行时快照刷新。
+- 响应同渠道对象（含最新 `balance`/`balance_updated_at`）。
+
+> 路由筛选：`routing.filter_exhausted_channels=true` 时，`balance <= routing.low_balance_threshold` 的渠道会从候选剔除；`balance` 为 `null` 表示不限、永不因余额被剔除。
 
 ---
 

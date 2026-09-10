@@ -308,6 +308,52 @@ func TestConcurrentLifecycle(t *testing.T) {
 	m.cleanupOnce()
 }
 
+func TestCandidatesFilterByBalance(t *testing.T) {
+	zero := 0.0
+	neg := -1.5
+	five := 5.0
+	c1 := chanInfo(1, "c1")
+	c1.Balance = &zero
+	c2 := chanInfo(2, "c2") // nil = 不限
+	c3 := chanInfo(3, "c3")
+	c3.Balance = &neg
+	c4 := chanInfo(4, "c4")
+	c4.Balance = &five
+
+	snap := snapOf(c1, c2, c3, c4)
+	addModel(snap, "gpt-4", 1, 2, 3, 4)
+
+	// threshold 0：剔除 <=0，保留 nil 与 5
+	m := New(Settings{FilterExhaustedChannels: true, LowBalanceThreshold: 0}, newFakeSource(snap), nil, discardLog())
+	m.syncOnce()
+	cands := m.Candidates("gpt-4")
+	if len(cands) != 2 || cands[0].ID != 2 || cands[1].ID != 4 {
+		t.Fatalf("threshold=0 expect channels [2,4], got %v", idsOf(cands))
+	}
+
+	// threshold 10：仅保留 nil(2)
+	m2 := New(Settings{FilterExhaustedChannels: true, LowBalanceThreshold: 10}, newFakeSource(snap), nil, discardLog())
+	m2.syncOnce()
+	if got := idsOf(m2.Candidates("gpt-4")); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("threshold=10 expect [2], got %v", got)
+	}
+
+	// 关闭筛选：全部保留
+	m3 := New(Settings{FilterExhaustedChannels: false}, newFakeSource(snap), nil, discardLog())
+	m3.syncOnce()
+	if got := m3.Candidates("gpt-4"); len(got) != 4 {
+		t.Fatalf("filter disabled expect 4, got %v", idsOf(got))
+	}
+}
+
+func idsOf(list []ChannelInfo) []int64 {
+	out := make([]int64, 0, len(list))
+	for _, c := range list {
+		out = append(out, c.ID)
+	}
+	return out
+}
+
 func TestRetireIdempotentAndPublish(t *testing.T) {
 	c1 := chanInfo(1, "c1")
 	src := newFakeSource(snapOf(c1))
