@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
-	"unicode/utf8"
 )
 
 type usagePayload struct {
@@ -34,8 +33,8 @@ func (t *sseUsageTee) Read(p []byte) (int, error) {
 	for len(t.out) == 0 {
 		ev, err := t.readEvent()
 		if len(ev) > 0 {
-			if keep, _ := t.processEvent(ev); keep {
-				t.out = ev
+			if keep, out := t.processEvent(ev); keep && len(out) > 0 {
+				t.out = out
 			}
 		}
 		if err != nil {
@@ -75,48 +74,82 @@ type sseChunk struct {
 	} `json:"choices"`
 }
 
-func (t *sseUsageTee) processEvent(ev []byte) (keep bool, isUsageOnly bool) {
+func (t *sseUsageTee) processEvent(ev []byte) (keep bool, out []byte) {
 	keep = true
 	hasData := false
-	for _, line := range strings.Split(string(ev), "\n") {
-		line = strings.TrimRight(line, "\r")
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
-			hasData = true
+	var buf bytes.Buffer
+
+	lines := strings.Split(strings.TrimRight(string(ev), "\n"), "\n")
+	for _, line := range lines {
+		raw := strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(raw, "data:") {
+			if raw != "" {
+				buf.WriteString(raw + "\n")
+			}
 			continue
 		}
 		hasData = true
-		var chunk sseChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+		payload := strings.TrimSpace(strings.TrimPrefix(raw, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			buf.WriteString("data: " + payload + "\n")
 			continue
 		}
+
+		var chunk sseChunk
+		_ = json.Unmarshal([]byte(payload), &chunk)
 		if chunk.Usage != nil {
 			cached := 0
 			if chunk.Usage.PromptTokensDetails != nil {
 				cached = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
 			t.meta.setUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, cached)
-			if len(chunk.Choices) == 0 {
-				isUsageOnly = true
-				if t.stripUsage {
-					keep = false
-				}
+			if len(chunk.Choices) == 0 && t.stripUsage {
+				keep = false
+				return false, nil
 			}
 		}
 		for i := range chunk.Choices {
-			t.meta.addOutputChars(utf8.RuneCountInString(chunk.Choices[i].Delta.Content))
+			t.meta.addOutputText(chunk.Choices[i].Delta.Content)
 		}
+		if t.meta.model != "" {
+			var m map[string]any
+			if json.Unmarshal([]byte(payload), &m) == nil {
+				m["model"] = t.meta.model
+				delete(m, "system_fingerprint")
+				if b, err := json.Marshal(m); err == nil {
+					payload = string(b)
+				}
+			}
+		}
+		buf.WriteString("data: " + payload + "\n")
 	}
-	if hasData && keep {
+
+	if hasData {
 		t.meta.markFirstByte()
 	}
-	return keep, isUsageOnly
+	buf.WriteString("\n")
+	return true, buf.Bytes()
 }
 
-func parseUsageJSON(body []byte) (in, out, cached int, outputChars int, ok bool) {
+// rewriteResponseModel 将非流式响应体的顶层 model 回写为网关别名，并移除上游指纹。
+func rewriteResponseModel(body []byte, alias string) []byte {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	if _, ok := m["model"]; !ok {
+		return body
+	}
+	m["model"] = alias
+	delete(m, "system_fingerprint")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func parseUsageJSON(body []byte) (in, out, cached int, content string, ok bool) {
 	var payload struct {
 		Usage   *usagePayload `json:"usage"`
 		Choices []struct {
@@ -126,17 +159,19 @@ func parseUsageJSON(body []byte) (in, out, cached int, outputChars int, ok bool)
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return 0, 0, 0, 0, false
+		return 0, 0, 0, "", false
 	}
+	var b strings.Builder
 	for i := range payload.Choices {
-		outputChars += utf8.RuneCountInString(payload.Choices[i].Message.Content)
+		b.WriteString(payload.Choices[i].Message.Content)
 	}
+	content = b.String()
 	if payload.Usage == nil {
-		return 0, 0, 0, outputChars, false
+		return 0, 0, 0, content, false
 	}
 	c := 0
 	if payload.Usage.PromptTokensDetails != nil {
 		c = payload.Usage.PromptTokensDetails.CachedTokens
 	}
-	return payload.Usage.PromptTokens, payload.Usage.CompletionTokens, c, outputChars, true
+	return payload.Usage.PromptTokens, payload.Usage.CompletionTokens, c, content, true
 }

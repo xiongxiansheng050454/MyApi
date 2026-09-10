@@ -25,16 +25,17 @@ type usageMeta struct {
 	injectedUsage bool
 	stream        bool
 
-	estimatedInput int
-	usageKnown     bool
-	inputTokens    int
-	outputTokens   int
-	cachedTokens   int
-	outputChars    int
-	ttftMs         *int
+	estimatedInput  int
+	usageKnown      bool
+	inputTokens     int
+	outputTokens    int
+	cachedTokens    int
+	outputTokensEst int
+	outputText      string
+	ttftMs          *int
+	count           func(string) int
 
-	frozenAmount  float64
-	balanceFrozen bool
+	reserve reservation
 }
 
 func (m *usageMeta) setUsage(in, out, cached int) {
@@ -44,13 +45,25 @@ func (m *usageMeta) setUsage(in, out, cached int) {
 	m.cachedTokens = cached
 }
 
-func (m *usageMeta) addOutputChars(n int) { m.outputChars += n }
-
 func (m *usageMeta) markFirstByte() {
 	if m.ttftMs == nil {
 		ms := int(time.Since(m.startedAt).Milliseconds())
 		m.ttftMs = &ms
 	}
+}
+
+func (m *usageMeta) addOutputText(text string) {
+	if text == "" || m.count == nil {
+		return
+	}
+	m.outputTokensEst += m.count(text)
+}
+
+func (m *usageMeta) countText(text string) int {
+	if text == "" || m.count == nil {
+		return 0
+	}
+	return m.count(text)
 }
 
 type dailyAggregator interface {
@@ -135,6 +148,53 @@ func (s *Service) statDate(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
+func (s *Service) insertUsageRow(row *model.UsageLog) int64 {
+	if s.DB == nil {
+		return 0
+	}
+	if err := s.DB.WithContext(context.Background()).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(row).Error; err != nil {
+		s.log.Error("insert usage log", "err", err, "request_id", row.RequestID)
+		return 0
+	}
+	return row.ID
+}
+
+func (s *Service) addUsageDelta(uid int64, input, output, cached int, costMicro int64, ok bool, maxID int64) {
+	d := usageDelta{
+		Input:     int64(input),
+		Output:    int64(output),
+		Cached:    int64(cached),
+		CostMicro: costMicro,
+		Req:       1,
+	}
+	if ok {
+		d.OK = 1
+	} else {
+		d.Err = 1
+	}
+	date := s.statDate(time.Now())
+	if s.delta != nil {
+		if err := s.delta.Add(context.Background(), date, uid, d, maxID); err != nil {
+			s.log.Warn("redis usage delta failed, fallback to db", "err", err)
+			s.applyDeltaDirect(date, uid, d, maxID)
+		}
+		return
+	}
+	s.applyDeltaDirect(date, uid, d, maxID)
+}
+
+func (s *Service) applyDeltaDirect(date string, uid int64, d usageDelta, maxID int64) {
+	if s.daily == nil {
+		return
+	}
+	if err := s.daily.Apply(context.Background(), date, map[int64]usageDelta{uid: d}, maxID); err != nil {
+		s.log.Error("apply daily stats", "err", err, "user_id", uid, "date", date)
+	}
+}
+
+// finalizeUsage 在请求结束时：先写数据库（usage_logs + 扣减余额），再"多退少补"Redis 预扣。
 func (s *Service) finalizeUsage(resp *CompletionResponse) {
 	meta := resp.meta
 	if meta == nil {
@@ -144,21 +204,23 @@ func (s *Service) finalizeUsage(resp *CompletionResponse) {
 	input, output, cached := meta.inputTokens, meta.outputTokens, meta.cachedTokens
 	if !meta.usageKnown {
 		input = meta.estimatedInput
-		per := s.cfg.RateLimit.CharsPerToken
-		if per <= 0 {
-			per = 4
-		}
-		output = meta.outputChars / per
-		if meta.outputChars%per > 0 {
-			output++
+		cached = 0
+		if meta.stream {
+			output = meta.outputTokensEst
+		} else {
+			output = meta.countText(meta.outputText)
 		}
 	}
 	if input < 0 {
 		input = 0
 	}
+	if output < 0 {
+		output = 0
+	}
 
 	pIn, pOut, pCached := s.lookupPricing(context.Background(), meta.channelID, meta.model)
 	cost := computeCost(input, output, cached, pIn, pOut, pCached)
+	actualMicro := int64(math.Round(cost * 1e8))
 
 	status := model.StatusSuccess
 	var errorCode *string
@@ -187,57 +249,17 @@ func (s *Service) finalizeUsage(resp *CompletionResponse) {
 		Status:               status,
 		ErrorCode:            errorCode,
 	}
-	var clientIP *string
 	if meta.clientIP != "" {
 		ip := meta.clientIP
-		clientIP = &ip
+		row.ClientIP = &ip
 	}
-	row.ClientIP = clientIP
+	id := s.insertUsageRow(&row)
 
-	db := s.DB
-	if db != nil {
-		if err := db.WithContext(context.Background()).
-			Clauses(clause.OnConflict{DoNothing: true}).
-			Create(&row).Error; err != nil {
-			s.log.Error("insert usage log", "err", err, "request_id", meta.requestID)
+	if s.cfg.Billing.Enabled && s.ledger != nil {
+		if err := s.ledger.Charge(context.Background(), meta.userID, meta.requestID, actualMicro); err != nil {
+			s.log.Error("charge balance", "err", err, "request_id", meta.requestID, "user_id", meta.userID)
 		}
 	}
-
-	if meta.balanceFrozen && s.billing != nil && s.cfg.Billing.Enabled {
-		if err := s.billing.Settle(context.Background(), meta.userID, meta.requestID, meta.frozenAmount, cost); err != nil {
-			s.log.Error("settle balance", "err", err, "request_id", meta.requestID, "user_id", meta.userID)
-		}
-	}
-
-	delta := usageDelta{
-		Input:     int64(input),
-		Output:    int64(output),
-		Cached:    int64(cached),
-		CostMicro: int64(math.Round(cost * 1e8)),
-		Req:       1,
-	}
-	if status == model.StatusSuccess {
-		delta.OK = 1
-	} else {
-		delta.Err = 1
-	}
-
-	date := s.statDate(time.Now())
-	if s.delta != nil {
-		if err := s.delta.Add(context.Background(), date, meta.userID, delta, row.ID); err != nil {
-			s.log.Warn("redis usage delta failed, fallback to db", "err", err)
-			s.applyDeltaDirect(date, meta.userID, delta, row.ID)
-		}
-		return
-	}
-	s.applyDeltaDirect(date, meta.userID, delta, row.ID)
-}
-
-func (s *Service) applyDeltaDirect(date string, uid int64, d usageDelta, maxID int64) {
-	if s.daily == nil {
-		return
-	}
-	if err := s.daily.Apply(context.Background(), date, map[int64]usageDelta{uid: d}, maxID); err != nil {
-		s.log.Error("apply daily stats", "err", err, "user_id", uid, "date", date)
-	}
+	s.settleReservation(context.Background(), meta.userID, meta.reserve, actualMicro)
+	s.addUsageDelta(meta.userID, input, output, cached, actualMicro, status == model.StatusSuccess, id)
 }

@@ -2,55 +2,57 @@ package service
 
 import (
 	"encoding/json"
-	"unicode/utf8"
+	"strings"
 )
 
-func (s *Service) estimateTokens(body []byte) int64 {
-	per := s.cfg.RateLimit.CharsPerToken
-	if per <= 0 {
-		per = 4
-	}
+// estimateTokens 用专业分词器估算请求输入 token（按 Chat 消息拼接 + 每条固定开销）。
+func (s *Service) estimateTokens(body []byte, model string) int64 {
 	var payload struct {
 		Messages []map[string]any `json:"messages"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return 0
 	}
-	var chars int
+	var b strings.Builder
 	for _, m := range payload.Messages {
-		chars += 3
-		if content, ok := m["content"]; ok {
-			chars += contentChars(content)
+		if role, ok := m["role"].(string); ok {
+			b.WriteString(role)
+			b.WriteString(": ")
 		}
+		if content, ok := m["content"]; ok {
+			b.WriteString(contentText(content))
+		}
+		b.WriteString("\n")
 	}
-	tokens := chars / per
-	if chars%per > 0 {
-		tokens++
+	if b.Len() == 0 {
+		return 0
 	}
-	return int64(tokens)
+	n := s.tokenizer.count(model, b.String())
+	n += 3 * len(payload.Messages)
+	return int64(n)
 }
 
-func contentChars(content any) int {
+func contentText(content any) string {
 	switch v := content.(type) {
 	case string:
-		return utf8.RuneCountInString(v)
+		return v
 	case []any:
-		total := 0
+		var b strings.Builder
 		for _, part := range v {
 			switch p := part.(type) {
 			case string:
-				total += utf8.RuneCountInString(p)
+				b.WriteString(p)
 			case map[string]any:
 				if text, ok := p["text"].(string); ok {
-					total += utf8.RuneCountInString(text)
+					b.WriteString(text)
 				}
 			}
 		}
-		return total
+		return b.String()
 	case map[string]any:
 		if text, ok := v["text"].(string); ok {
-			return utf8.RuneCountInString(text)
+			return text
 		}
 	}
-	return 0
+	return ""
 }

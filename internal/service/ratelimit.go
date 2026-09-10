@@ -102,7 +102,7 @@ func (s *Service) rateLimitGate(ctx context.Context, req *ChatCompletionRequest)
 	var tokenDelta int64
 	needTokens := func() int64 {
 		if tokenDelta == 0 {
-			tokenDelta = s.estimateTokens(req.Body)
+			tokenDelta = s.estimateTokens(req.Body, req.Model)
 		}
 		return tokenDelta
 	}

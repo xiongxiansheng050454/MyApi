@@ -5,173 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
-
-	"MyApi/internal/model"
 )
 
-type balanceStore interface {
-	Check(ctx context.Context, uid int64) error
-	Freeze(ctx context.Context, uid int64, amount float64, requestID string) error
-	Settle(ctx context.Context, uid int64, requestID string, frozen, actual float64) error
-	Unfreeze(ctx context.Context, uid int64, requestID string, amount float64) error
-}
-
-type gormBalance struct {
-	db *gorm.DB
-}
-
 func round8(v float64) float64 { return math.Round(v*1e8) / 1e8 }
-
-func (b *gormBalance) lockRow(tx *gorm.DB, uid int64) (*model.UserBalance, error) {
-	var bal model.UserBalance
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", uid).First(&bal).Error
-	if err != nil {
-		return nil, err
-	}
-	return &bal, nil
-}
-
-func (b *gormBalance) Check(ctx context.Context, uid int64) error {
-	var bal model.UserBalance
-	err := b.db.WithContext(ctx).Where("user_id = ?", uid).First(&bal).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrInsufficientBalance
-		}
-		return err
-	}
-	if bal.AvailableBalance <= 0 {
-		return ErrInsufficientBalance
-	}
-	return nil
-}
-
-func (b *gormBalance) Freeze(ctx context.Context, uid int64, amount float64, requestID string) error {
-	amount = round8(amount)
-	return b.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		bal, err := b.lockRow(tx, uid)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrInsufficientBalance
-			}
-			return err
-		}
-		if bal.AvailableBalance+1e-9 < amount {
-			return ErrInsufficientBalance
-		}
-		before := bal.AvailableBalance
-		bal.AvailableBalance = round8(bal.AvailableBalance - amount)
-		bal.FrozenBalance = round8(bal.FrozenBalance + amount)
-		bal.Version++
-		if err := tx.Save(bal).Error; err != nil {
-			return err
-		}
-		return tx.Create(&model.BalanceTransaction{
-			UserID:         uid,
-			Amount:         -amount,
-			BalanceBefore:  before,
-			BalanceAfter:   bal.AvailableBalance,
-			TxType:         "freeze",
-			RelatedRequest: strPtr(requestID),
-		}).Error
-	})
-}
-
-func (b *gormBalance) Settle(ctx context.Context, uid int64, requestID string, frozen, actual float64) error {
-	frozen = round8(frozen)
-	actual = round8(actual)
-	if actual < 0 {
-		actual = 0
-	}
-	return b.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		bal, err := b.lockRow(tx, uid)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
-			}
-			return err
-		}
-		charged := actual
-		remaining := frozen - actual
-		beforeAvail := bal.AvailableBalance
-		bal.FrozenBalance = round8(bal.FrozenBalance - frozen)
-		if bal.FrozenBalance < 0 {
-			bal.FrozenBalance = 0
-		}
-		if remaining > 0 {
-			bal.AvailableBalance = round8(bal.AvailableBalance + remaining)
-		} else if remaining < 0 {
-			extra := -remaining
-			if bal.AvailableBalance < extra {
-				extra = bal.AvailableBalance
-			}
-			bal.AvailableBalance = round8(bal.AvailableBalance - extra)
-			charged = round8(frozen + extra)
-		}
-		bal.Version++
-		if err := tx.Save(bal).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(&model.BalanceTransaction{
-			UserID:         uid,
-			Amount:         -charged,
-			BalanceBefore:  beforeAvail,
-			BalanceAfter:   bal.AvailableBalance,
-			TxType:         "consume",
-			RelatedRequest: strPtr(requestID),
-		}).Error; err != nil {
-			return err
-		}
-		if remaining > 0 {
-			return tx.Create(&model.BalanceTransaction{
-				UserID:         uid,
-				Amount:         remaining,
-				BalanceBefore:  beforeAvail,
-				BalanceAfter:   bal.AvailableBalance,
-				TxType:         "unfreeze",
-				RelatedRequest: strPtr(requestID),
-			}).Error
-		}
-		return nil
-	})
-}
-
-func (b *gormBalance) Unfreeze(ctx context.Context, uid int64, requestID string, amount float64) error {
-	amount = round8(amount)
-	if amount <= 0 {
-		return nil
-	}
-	return b.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		bal, err := b.lockRow(tx, uid)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
-			}
-			return err
-		}
-		bal.FrozenBalance = round8(bal.FrozenBalance - amount)
-		if bal.FrozenBalance < 0 {
-			bal.FrozenBalance = 0
-		}
-		beforeAvail := bal.AvailableBalance
-		bal.AvailableBalance = round8(bal.AvailableBalance + amount)
-		bal.Version++
-		if err := tx.Save(bal).Error; err != nil {
-			return err
-		}
-		return tx.Create(&model.BalanceTransaction{
-			UserID:         uid,
-			Amount:         amount,
-			BalanceBefore:  beforeAvail,
-			BalanceAfter:   bal.AvailableBalance,
-			TxType:         "unfreeze",
-			RelatedRequest: strPtr(requestID),
-		}).Error
-	})
-}
 
 func strPtr(s string) *string {
 	if s == "" {
@@ -199,14 +35,89 @@ func (s *Service) outputBudget(body []byte) int {
 	return b
 }
 
-// estimateFreeze 返回该渠道+模型的预估冻结额；priced=false 表示无单价（仅做余额>0 校验）。
-func (s *Service) estimateFreeze(ctx context.Context, channelID int64, req *ChatCompletionRequest) (amount float64, priced bool) {
+// estimateFreezeMicro 返回该渠道+模型的预估冻结额（微单位，1e8=1）；priced=false 表示无单价。
+func (s *Service) estimateFreezeMicro(ctx context.Context, channelID int64, req *ChatCompletionRequest) (int64, bool) {
 	in, out, _ := s.lookupPricing(ctx, channelID, req.Model)
 	if in <= 0 && out <= 0 {
 		return 0, false
 	}
-	inTokens := float64(s.estimateTokens(req.Body))
+	inTokens := float64(s.estimateTokens(req.Body, req.Model))
 	outTokens := float64(s.outputBudget(req.Body))
-	amount = round8((inTokens*in + outTokens*out) / 1e6)
-	return amount, true
+	amount := (inTokens*in + outTokens*out) / 1e6
+	return int64(math.Round(amount * 1e8)), true
+}
+
+// reservation 表示一次上游尝试的 Redis 预扣。
+type reservation struct {
+	active      bool
+	gen         string
+	amountMicro int64
+}
+
+// reserve 执行预扣：有单价走 Redis 预扣；无单价仅校验可用余额 > 0。
+func (s *Service) reserve(ctx context.Context, req *ChatCompletionRequest, channelID int64) (reservation, error) {
+	if !s.cfg.Billing.Enabled {
+		return reservation{}, nil
+	}
+	if s.balance == nil {
+		return reservation{}, ErrStoreDown
+	}
+	amountMicro, priced := s.estimateFreezeMicro(ctx, channelID, req)
+	if !priced {
+		if err := s.balance.CheckPositive(ctx, req.Key.UserID); err != nil {
+			if errors.Is(err, ErrInsufficientBalance) {
+				return reservation{}, err
+			}
+			return reservation{}, ErrStoreDown
+		}
+		return reservation{}, nil
+	}
+	gen, err := s.balance.PreDeduct(ctx, req.Key.UserID, amountMicro)
+	if err != nil {
+		if errors.Is(err, ErrInsufficientBalance) {
+			return reservation{}, err
+		}
+		return reservation{}, ErrStoreDown
+	}
+	return reservation{active: true, gen: gen, amountMicro: amountMicro}, nil
+}
+
+func (s *Service) releaseReservation(ctx context.Context, uid int64, r reservation) {
+	if !r.active || s.balance == nil {
+		return
+	}
+	if err := s.balance.Release(ctx, uid, r.gen, r.amountMicro); err != nil {
+		s.log.Warn("release reservation", "err", err, "user_id", uid)
+	}
+}
+
+func (s *Service) settleReservation(ctx context.Context, uid int64, r reservation, actualMicro int64) {
+	if !r.active || s.balance == nil {
+		return
+	}
+	if err := s.balance.Settle(ctx, uid, r.gen, r.amountMicro, actualMicro); err != nil {
+		s.log.Warn("settle reservation", "err", err, "user_id", uid)
+	}
+}
+
+func (s *Service) loadBalanceMicro(ctx context.Context, uid int64) (int64, error) {
+	db := s.WithContext(ctx)
+	if db == nil {
+		return 0, ErrStoreDown
+	}
+	var bal modelBalanceRow
+	if err := db.Table("user_balances").Select("available_balance").Where("user_id = ?", uid).Scan(&bal).Error; err != nil {
+		return 0, err
+	}
+	return int64(math.Round(bal.AvailableBalance * 1e8)), nil
+}
+
+func (s *Service) InvalidateBalance(ctx context.Context, uid int64) {
+	if s.balance != nil {
+		_ = s.balance.Invalidate(ctx, uid)
+	}
+}
+
+type modelBalanceRow struct {
+	AvailableBalance float64 `gorm:"column:available_balance"`
 }
