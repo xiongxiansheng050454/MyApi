@@ -157,6 +157,11 @@ data: [DONE]
 data: {"error":{"message":"...","type":"upstream_error","param":null,"code":"upstream_error"}}
 ```
 
+- **同渠道重试**：失败时会先对**同一渠道**重试 `routing.max_retries_per_channel` 次（默认 2），仍失败才按优先级换渠道。
+- **重试边界**：仅当**尚未向下游写出任何内容**时可重试；一旦已输出 token，再重试会产生重复内容，故网关直接补发 `error` 事件 + `[DONE]` 终止。
+- **空闲超时**：上游超过 `upstream.stream_idle_timeout_seconds`（默认 60s）无数据即判定卡死并中断。
+- **下游断开**：客户端断开连接后网关立即取消上游请求，及时止损；已收到的完整块按分词估算计费。
+
 > 注意：错误可能发生在已发送部分 token 之后，属于流式场景固有限制，下游需按自己的重试策略处理。
 
 ---

@@ -19,3 +19,13 @@ func modelName(body []byte) (string, error) {
 	}
 	return req.Model, nil
 }
+
+func streamFlag(body []byte) bool {
+	var req struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	return req.Stream
+}

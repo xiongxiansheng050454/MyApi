@@ -25,6 +25,7 @@ type Routing struct {
 	MaxAttemptsPerPriority  int     `yaml:"max_attempts_per_priority"`
 	TryNextPriority         bool    `yaml:"try_next_priority"`
 	MaxTotalAttempts        int     `yaml:"max_total_attempts"`
+	MaxRetriesPerChannel    int     `yaml:"max_retries_per_channel"`
 	FilterExhaustedChannels bool    `yaml:"filter_exhausted_channels"`
 	LowBalanceThreshold     float64 `yaml:"low_balance_threshold"`
 }
@@ -82,8 +83,8 @@ type Upstream struct {
 	BreakerIntervalSeconds     int    `yaml:"breaker_interval_seconds"`
 	BreakerTimeoutSeconds      int    `yaml:"breaker_timeout_seconds"`
 	BreakerConsecutiveFailures uint32 `yaml:"breaker_consecutive_failures"`
-	MaxForwardAttempts         int    `yaml:"max_forward_attempts"`
 	HealthTimeoutSeconds       int    `yaml:"health_timeout_seconds"`
+	StreamIdleTimeoutSeconds   int    `yaml:"stream_idle_timeout_seconds"`
 	DialTimeoutSeconds         int    `yaml:"dial_timeout_seconds"`
 	TLSHandshakeTimeoutSeconds int    `yaml:"tls_handshake_timeout_seconds"`
 }
@@ -110,8 +111,8 @@ func Default() *Config {
 			BreakerIntervalSeconds:     0,
 			BreakerTimeoutSeconds:      30,
 			BreakerConsecutiveFailures: 5,
-			MaxForwardAttempts:         2,
 			HealthTimeoutSeconds:       8,
+			StreamIdleTimeoutSeconds:   60,
 			DialTimeoutSeconds:         5,
 			TLSHandshakeTimeoutSeconds: 5,
 		},
@@ -123,6 +124,7 @@ func Default() *Config {
 			MaxAttemptsPerPriority:  0,
 			TryNextPriority:         true,
 			MaxTotalAttempts:        0,
+			MaxRetriesPerChannel:    2,
 			FilterExhaustedChannels: true,
 			LowBalanceThreshold:     0,
 		},

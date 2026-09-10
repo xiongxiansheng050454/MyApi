@@ -194,9 +194,8 @@ func (s *Service) applyDeltaDirect(date string, uid int64, d usageDelta, maxID i
 	}
 }
 
-// finalizeUsage 在请求结束时：先写数据库（usage_logs + 扣减余额），再"多退少补"Redis 预扣。
-func (s *Service) finalizeUsage(resp *CompletionResponse) {
-	meta := resp.meta
+// finalizeMeta 在请求结束时：先写数据库（usage_logs + 扣减余额），再"多退少补"Redis 预扣。
+func (s *Service) finalizeMeta(meta *usageMeta) {
 	if meta == nil {
 		return
 	}

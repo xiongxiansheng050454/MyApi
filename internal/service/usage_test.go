@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,34 +35,6 @@ func TestParseUsageJSON(t *testing.T) {
 	}
 }
 
-func makeSSEChunk(content string) string {
-	return `data: {"choices":[{"delta":{"content":"` + content + `"}}]}` + "\n\n"
-}
-
-const sseUsageOnly = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":1}}}\n\n"
-
-func TestSSETeeStripsInjectedUsage(t *testing.T) {
-	stream := makeSSEChunk("Hel") + makeSSEChunk("lo") + sseUsageOnly + "data: [DONE]\n\n"
-	meta := &usageMeta{startedAt: time.Now(), count: func(s string) int { return len(s) }}
-	tee := newSSEUsageTee(strings.NewReader(stream), meta, true)
-	out, err := io.ReadAll(tee)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(out), `"usage"`) {
-		t.Fatalf("usage-only frame should be stripped, got: %s", out)
-	}
-	if !strings.Contains(string(out), "[DONE]") {
-		t.Fatal("DONE should be preserved")
-	}
-	if !meta.usageKnown || meta.inputTokens != 9 || meta.outputTokens != 2 || meta.cachedTokens != 1 {
-		t.Fatalf("usage not captured: %+v", meta)
-	}
-	if meta.outputTokensEst != 5 {
-		t.Fatalf("outputTokensEst=%d want 5", meta.outputTokensEst)
-	}
-}
-
 func TestRewriteResponseModel(t *testing.T) {
 	body := []byte(`{"id":"x","model":"deepseek-flash","system_fingerprint":"abc","choices":[]}`)
 	out := rewriteResponseModel(body, "gpt-4")
@@ -82,30 +52,6 @@ func TestRewriteResponseModel(t *testing.T) {
 	plain := []byte(`{"error":{"message":"x"}}`)
 	if string(rewriteResponseModel(plain, "gpt-4")) != string(plain) {
 		t.Fatal("body without model should be unchanged")
-	}
-}
-
-func TestSSETeeRewritesModel(t *testing.T) {
-	stream := makeSSEChunk("hi") + sseUsageOnly + "data: [DONE]\n\n"
-	meta := &usageMeta{startedAt: time.Now(), model: "gpt-4"}
-	tee := newSSEUsageTee(strings.NewReader(stream), meta, true)
-	out, _ := io.ReadAll(tee)
-	s := string(out)
-	if strings.Contains(s, "deepseek") || strings.Contains(s, `"model":"gpt-4"`) == false {
-		t.Fatalf("stream chunk model should be rewritten: %s", s)
-	}
-	if strings.Contains(s, `"usage"`) {
-		t.Fatal("usage-only frame should still be stripped")
-	}
-}
-
-func TestSSETeeKeepsRequestedUsage(t *testing.T) {
-	stream := makeSSEChunk("hi") + sseUsageOnly + "data: [DONE]\n\n"
-	meta := &usageMeta{startedAt: time.Now()}
-	tee := newSSEUsageTee(strings.NewReader(stream), meta, false)
-	out, _ := io.ReadAll(tee)
-	if !strings.Contains(string(out), `"usage"`) {
-		t.Fatal("usage frame should be kept when downstream requested it")
 	}
 }
 

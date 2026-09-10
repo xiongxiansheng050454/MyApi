@@ -29,8 +29,8 @@ upstream:
   breaker_interval_seconds: 0 # 熔断计数周期, 0=不按周期重置
   breaker_timeout_seconds: 30 # Open->HalfOpen 等待
   breaker_consecutive_failures: 5  # 连续失败达到该值触发熔断
-  max_forward_attempts: 2    # 转发失败可尝试的上游渠道次数
   health_timeout_seconds: 8  # /test 健康检查单次硬超时
+  stream_idle_timeout_seconds: 60  # 流式上游空闲超时(无数据则判定卡死)
   dial_timeout_seconds: 5    # 上游建连超时
   tls_handshake_timeout_seconds: 5
 
@@ -40,6 +40,7 @@ routing:
   max_attempts_per_priority: 0  # 每个优先级组最多尝试数, 0=整组
   try_next_priority: true     # 整组失败后降级到下一优先级
   max_total_attempts: 0       # 总尝试上限, 0=不限(受候选数约束)
+  max_retries_per_channel: 2  # 同渠道重试次数(耗尽再换下一渠道)
   filter_exhausted_channels: true  # 渠道余额 <= 低水位时从路由剔除
   low_balance_threshold: 0    # 低水位阈值(USD)
 
