@@ -20,11 +20,13 @@ type Config struct {
 }
 
 type Routing struct {
-	StickyEnabled          bool `yaml:"sticky_enabled"`
-	StickyTTLSeconds       int  `yaml:"sticky_ttl_seconds"`
-	MaxAttemptsPerPriority int  `yaml:"max_attempts_per_priority"`
-	TryNextPriority        bool `yaml:"try_next_priority"`
-	MaxTotalAttempts       int  `yaml:"max_total_attempts"`
+	StickyEnabled           bool    `yaml:"sticky_enabled"`
+	StickyTTLSeconds        int     `yaml:"sticky_ttl_seconds"`
+	MaxAttemptsPerPriority  int     `yaml:"max_attempts_per_priority"`
+	TryNextPriority         bool    `yaml:"try_next_priority"`
+	MaxTotalAttempts        int     `yaml:"max_total_attempts"`
+	FilterExhaustedChannels bool    `yaml:"filter_exhausted_channels"`
+	LowBalanceThreshold     float64 `yaml:"low_balance_threshold"`
 }
 
 type Billing struct {
@@ -116,11 +118,13 @@ func Default() *Config {
 		RateLimit: RateLimit{CacheTTLSeconds: 2, CharsPerToken: 4},
 		Stats:     Stats{FlushIntervalSeconds: 5, Timezone: "UTC", RedisTTLHours: 168},
 		Routing: Routing{
-			StickyEnabled:          true,
-			StickyTTLSeconds:       1800,
-			MaxAttemptsPerPriority: 0,
-			TryNextPriority:        true,
-			MaxTotalAttempts:       0,
+			StickyEnabled:           true,
+			StickyTTLSeconds:        1800,
+			MaxAttemptsPerPriority:  0,
+			TryNextPriority:         true,
+			MaxTotalAttempts:        0,
+			FilterExhaustedChannels: true,
+			LowBalanceThreshold:     0,
 		},
 		Billing: Billing{Enabled: true, DefaultOutputBudget: 1024, DefaultEncoding: "cl100k_base", BalanceTTLSeconds: 3600, LockTTLSeconds: 3},
 		Log:     Log{Level: "info", Format: "text"},

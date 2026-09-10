@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"time"
+
+	"gorm.io/gorm"
+
+	"MyApi/internal/model"
 )
 
 func round8(v float64) float64 { return math.Round(v*1e8) / 1e8 }
@@ -120,4 +125,21 @@ func (s *Service) InvalidateBalance(ctx context.Context, uid int64) {
 
 type modelBalanceRow struct {
 	AvailableBalance float64 `gorm:"column:available_balance"`
+}
+
+// chargeChannelBalance 按本地估算费用扣减渠道余额（DB 原子；NULL 余额=不限，不扣）。
+func (s *Service) chargeChannelBalance(ctx context.Context, channelID int64, amountMicro int64) {
+	if amountMicro <= 0 || s.DB == nil {
+		return
+	}
+	amount := float64(amountMicro) / 1e8
+	err := s.DB.WithContext(ctx).Model(&model.Channel{}).
+		Where("id = ? AND balance IS NOT NULL", channelID).
+		Updates(map[string]any{
+			"balance":            gorm.Expr("balance - ?", amount),
+			"balance_updated_at": time.Now(),
+		}).Error
+	if err != nil {
+		s.log.Error("charge channel balance", "err", err, "channel_id", channelID)
+	}
 }

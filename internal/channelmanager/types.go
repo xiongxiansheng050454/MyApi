@@ -9,6 +9,7 @@ type ChannelInfo struct {
 	AuthType string
 	Weight   int
 	Priority int
+	Balance  *float64
 }
 
 type Snapshot struct {
@@ -33,6 +34,8 @@ type Settings struct {
 	BreakerInterval            time.Duration
 	BreakerTimeout             time.Duration
 	BreakerConsecutiveFailures uint32
+	FilterExhaustedChannels    bool
+	LowBalanceThreshold        float64
 }
 
 func (s Settings) cacheInterval() time.Duration {

@@ -255,6 +255,8 @@ func (s *Service) finalizeUsage(resp *CompletionResponse) {
 	}
 	id := s.insertUsageRow(&row)
 
+	s.chargeChannelBalance(context.Background(), meta.channelID, actualMicro)
+
 	if s.cfg.Billing.Enabled && s.ledger != nil {
 		if err := s.ledger.Charge(context.Background(), meta.userID, meta.requestID, actualMicro); err != nil {
 			s.log.Error("charge balance", "err", err, "request_id", meta.requestID, "user_id", meta.userID)

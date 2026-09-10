@@ -101,6 +101,9 @@ func (m *Manager) Candidates(model string) []ChannelInfo {
 		if w := m.breakers[id]; w != nil && w.isOpen() {
 			continue
 		}
+		if m.settings.FilterExhaustedChannels && e.info.Balance != nil && *e.info.Balance <= m.settings.LowBalanceThreshold {
+			continue
+		}
 		out = append(out, e.info)
 	}
 	return out
