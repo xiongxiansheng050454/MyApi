@@ -37,7 +37,7 @@ upstream:
   tls_handshake_timeout_seconds: 5
 
 routing:
-  sticky_enabled: true        # 按 user_id 粘性路由（Redis 亲和）
+  sticky_enabled: true        # 按会话粘性路由（Redis 亲和）
   sticky_ttl_seconds: 1800    # 亲和有效期
   max_attempts_per_priority: 0  # 每个优先级组最多尝试数, 0=整组
   try_next_priority: true     # 整组失败后降级到下一优先级

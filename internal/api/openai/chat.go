@@ -61,6 +61,7 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 		RequestID: c.GetString("request_id"),
 		ClientIP:  c.ClientIP(),
 		StartedAt: time.Now(),
+		SessionID: c.GetHeader("X-Session-Id"),
 	}
 
 	if streamFlag(body) {
