@@ -47,6 +47,27 @@ func keyToOut(k *model.ClientApiKey) keyOut {
 	}
 }
 
+// lastUsedMap 从 usage_logs 派生每个 Key 的最后使用时间（只读，不写 client_api_keys.last_used_at）。
+func (h *Handler) lastUsedMap(db *gorm.DB, keyIDs []int64) map[int64]time.Time {
+	out := map[int64]time.Time{}
+	if len(keyIDs) == 0 {
+		return out
+	}
+	var rows []struct {
+		ApiKeyID int64     `gorm:"column:api_key_id"`
+		Last     time.Time `gorm:"column:last"`
+	}
+	_ = db.Model(&model.UsageLog{}).
+		Select("api_key_id, MAX(created_at) AS last").
+		Where("api_key_id IN ?", keyIDs).
+		Group("api_key_id").
+		Scan(&rows).Error
+	for _, r := range rows {
+		out[r.ApiKeyID] = r.Last
+	}
+	return out
+}
+
 func validJSONObject(raw json.RawMessage) error {
 	var m any
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -192,8 +213,17 @@ func (h *Handler) listKeys(c *gin.Context) {
 		return
 	}
 	list := make([]keyOut, 0, len(rows))
+	ids := make([]int64, 0, len(rows))
 	for i := range rows {
-		list = append(list, keyToOut(&rows[i]))
+		ids = append(ids, rows[i].ID)
+	}
+	lastUsed := h.lastUsedMap(db, ids)
+	for i := range rows {
+		o := keyToOut(&rows[i])
+		if t, ok := lastUsed[rows[i].ID]; ok {
+			o.LastUsedAt = &t
+		}
+		list = append(list, o)
 	}
 	OK(c, gin.H{"list": list, "total": total, "page": page, "page_size": pageSize})
 }
@@ -225,8 +255,17 @@ func (h *Handler) listUserKeys(c *gin.Context) {
 		return
 	}
 	list := make([]keyOut, 0, len(rows))
+	ids := make([]int64, 0, len(rows))
 	for i := range rows {
-		list = append(list, keyToOut(&rows[i]))
+		ids = append(ids, rows[i].ID)
+	}
+	lastUsed := h.lastUsedMap(db, ids)
+	for i := range rows {
+		o := keyToOut(&rows[i])
+		if t, ok := lastUsed[rows[i].ID]; ok {
+			o.LastUsedAt = &t
+		}
+		list = append(list, o)
 	}
 	OK(c, gin.H{"list": list, "total": total, "page": page, "page_size": pageSize})
 }
