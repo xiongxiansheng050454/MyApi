@@ -18,8 +18,8 @@ type UsageLog struct {
 	OutputTokens         int            `gorm:"not null;default:0" json:"output_tokens"`
 	CachedInputTokens    int            `gorm:"default:0" json:"cached_input_tokens"`
 	TotalTokens          int            `gorm:"->;not null;default:0" json:"total_tokens"`
-	UnitPriceInputPer1M  float64        `gorm:"not null;type:numeric(12,8)" json:"unit_price_input_per_1m"`
-	UnitPriceOutputPer1M float64        `gorm:"not null;type:numeric(12,8)" json:"unit_price_output_per_1m"`
+	UnitPriceInputPer1M  float64        `gorm:"column:unit_price_input_per_1m;not null;type:numeric(12,8)" json:"unit_price_input_per_1m"`
+	UnitPriceOutputPer1M float64        `gorm:"column:unit_price_output_per_1m;not null;type:numeric(12,8)" json:"unit_price_output_per_1m"`
 	TotalCost            float64        `gorm:"not null;type:numeric(12,8)" json:"total_cost"`
 	DurationMs           int            `gorm:"not null" json:"duration_ms"`
 	TtftMs               *int           `json:"ttft_ms"`

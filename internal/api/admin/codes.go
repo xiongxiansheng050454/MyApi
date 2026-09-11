@@ -36,3 +36,16 @@ const (
 	CodeRateInvalidValue        = 40002
 	CodeRateQueueTimeoutMissing = 40003
 )
+
+const (
+	CodeLogNotFound       = 50000
+	CodeTimeRangeInvalid  = 50001
+	CodeDateFormatInvalid = 50002
+)
+
+const (
+	CodePricingNotFound      = 30000
+	CodePricingInvalid       = 30001
+	CodePricingModelNotFound = 30002
+	CodePricingCurrency      = 30003
+)
