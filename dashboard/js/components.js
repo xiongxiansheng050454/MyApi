@@ -137,7 +137,7 @@ function Sparkline(points, { w = 220, h = 40, color = '#22d3ee' } = {}) {
 
 /** SVG 柱状趋势图（带 tooltip） */
 function BarChart(days, { height = 180 } = {}) {
-  const max = Math.max(...days.map((d) => d.requests));
+  const max = Math.max(1, ...days.map((d) => d.requests));
   return el(`
     <div class="relative flex items-end gap-[6px]" style="height:${height}px">
       ${days.map((d, i) => {
