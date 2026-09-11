@@ -8,17 +8,7 @@ type route struct {
 	summary string
 }
 
-var placeholderRoutes = []route{
-	{"POST", "/pricing", "设置/覆盖单价"},
-	{"GET", "/pricing", "查询单价"},
-	{"DELETE", "/pricing", "删除单价"},
-
-	{"GET", "/usage-logs", "请求日志列表"},
-	{"GET", "/usage-logs/:logId", "请求日志详情"},
-	{"GET", "/stats/daily", "用户日汇总"},
-	{"GET", "/stats/overview", "总览"},
-	{"GET", "/stats/channels", "渠道成本"},
-}
+var placeholderRoutes = []route{}
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/channels", h.createChannel)
@@ -56,6 +46,16 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/rate-limits/:ruleId", h.getRateRule)
 	rg.PUT("/rate-limits/:ruleId", h.updateRateRule)
 	rg.DELETE("/rate-limits/:ruleId", h.deleteRateRule)
+
+	rg.GET("/usage-logs", h.listUsageLogs)
+	rg.GET("/usage-logs/:logId", h.getUsageLog)
+	rg.GET("/stats/daily", h.statsDaily)
+	rg.GET("/stats/overview", h.statsOverview)
+	rg.GET("/stats/channels", h.statsChannels)
+
+	rg.POST("/pricing", h.setPricing)
+	rg.GET("/pricing", h.listPricing)
+	rg.DELETE("/pricing", h.deletePricing)
 
 	notImplemented := func(summary string) gin.HandlerFunc {
 		return func(c *gin.Context) {
