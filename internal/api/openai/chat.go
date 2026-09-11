@@ -23,6 +23,7 @@ func New(svc *service.Service) *Handler {
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/chat/completions", h.ChatCompletions)
+	rg.GET("/models", h.Models)
 }
 
 func (h *Handler) ChatCompletions(c *gin.Context) {

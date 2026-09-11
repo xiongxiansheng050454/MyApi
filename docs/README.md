@@ -48,6 +48,7 @@ MyApi 是一个面向 LLM 的 **API 网关 / 统一接入层**。它向下游业
 | 文档 | 说明 |
 | --- | --- |
 | [01-下游接口/chat-completions.md](01-下游接口/chat-completions.md) | `POST /v1/chat/completions`，含非流式与 SSE 流式转发 |
+| [01-下游接口/models.md](01-下游接口/models.md) | `GET /v1/models`，返回当前对下游发布的网关模型列表 |
 | [01-下游接口/结算与限速语义.md](01-下游接口/结算与限速语义.md) | 计费（预冻结+结算）、限速配额、用量统计口径 |
 
 ### 2.2 管理端接口（内网 / 后台使用）
