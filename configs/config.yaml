@@ -2,6 +2,8 @@ server:
   host: "0.0.0.0"
   port: 8080
   mode: debug            # debug / release
+  dashboard_dir: dashboard  # 静态前端目录（/dashboard）
+  docs_dir: docs            # 接口文档目录（/docs）
 
 database:
   enabled: true
