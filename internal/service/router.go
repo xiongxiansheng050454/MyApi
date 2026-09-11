@@ -123,6 +123,8 @@ func (s *Service) settleFailedAttempt(ctx context.Context, req *ChatCompletionRe
 	}
 	id := s.insertUsageRow(&row)
 
+	s.chargeChannelBalance(ctx, info.ID, actualMicro)
+
 	if s.cfg.Billing.Enabled && s.ledger != nil {
 		if err := s.ledger.Charge(ctx, req.Key.UserID, attemptReqID, actualMicro); err != nil {
 			s.log.Error("charge failed attempt", "err", err, "request_id", attemptReqID)

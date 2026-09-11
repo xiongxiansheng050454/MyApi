@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -89,21 +90,24 @@ type channelReq struct {
 	Status      *int            `json:"status"`
 	Weight      *int            `json:"weight"`
 	Priority    *int            `json:"priority"`
+	Balance     *string         `json:"balance"`
 }
 
 type channelOut struct {
-	ID           int64          `json:"id"`
-	Name         string         `json:"name"`
-	BaseURL      string         `json:"base_url"`
-	APIKeyMasked string         `json:"api_key_masked"`
-	AuthType     string         `json:"auth_type"`
-	ExtraConfig  datatypes.JSON `json:"extra_config"`
-	Status       int16          `json:"status"`
-	Weight       int            `json:"weight"`
-	Priority     int            `json:"priority"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	ModelCount   int64          `json:"model_count,omitempty"`
+	ID               int64          `json:"id"`
+	Name             string         `json:"name"`
+	BaseURL          string         `json:"base_url"`
+	APIKeyMasked     string         `json:"api_key_masked"`
+	AuthType         string         `json:"auth_type"`
+	ExtraConfig      datatypes.JSON `json:"extra_config"`
+	Status           int16          `json:"status"`
+	Weight           int            `json:"weight"`
+	Priority         int            `json:"priority"`
+	Balance          *string        `json:"balance"`
+	BalanceUpdatedAt *time.Time     `json:"balance_updated_at"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+	ModelCount       int64          `json:"model_count,omitempty"`
 }
 
 func maskSecret(s string) string {
@@ -134,6 +138,11 @@ func channelToOut(m *model.Channel) channelOut {
 	if len(m.ExtraConfig) == 0 {
 		out.ExtraConfig = datatypes.JSON("{}")
 	}
+	if m.Balance != nil {
+		s := priceFmt(*m.Balance)
+		out.Balance = &s
+	}
+	out.BalanceUpdatedAt = m.BalanceUpdatedAt
 	return out
 }
 
@@ -181,6 +190,14 @@ func (h *Handler) createChannel(c *gin.Context) {
 		Status:      status,
 		Weight:      weight,
 		Priority:    priority,
+	}
+	if req.Balance != nil && strings.TrimSpace(*req.Balance) != "" {
+		v, ok := parsePrice(*req.Balance)
+		if !ok {
+			Fail(c, CodeChRequiredMissing, "balance 必须为 >= 0 的数字")
+			return
+		}
+		m.Balance = &v
 	}
 	if err := db.Create(&m).Error; err != nil {
 		h.log.Error("create channel", "err", err)
@@ -293,6 +310,20 @@ func (h *Handler) updateChannel(c *gin.Context) {
 	if req.Priority != nil {
 		updates["priority"] = *req.Priority
 	}
+	if req.Balance != nil {
+		if strings.TrimSpace(*req.Balance) == "" {
+			updates["balance"] = nil
+			updates["balance_updated_at"] = nil
+		} else {
+			v, ok := parsePrice(*req.Balance)
+			if !ok {
+				Fail(c, CodeParamError, "balance 必须为 >= 0 的数字")
+				return
+			}
+			updates["balance"] = v
+			updates["balance_updated_at"] = time.Now()
+		}
+	}
 	if len(updates) == 0 {
 		Fail(c, CodeParamError, "没有可更新字段")
 		return
@@ -387,6 +418,70 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 	}
 	h.notifyDeleted(id)
 	OK(c, gin.H{"id": id})
+}
+
+func (h *Handler) setChannelBalance(c *gin.Context) {
+	id, ok := idParam(c, "channelId")
+	if !ok {
+		return
+	}
+	var req struct {
+		Balance     *string `json:"balance"`
+		Delta       *string `json:"delta"`
+		Description *string `json:"description"`
+	}
+	if !bindJSON(c, &req) {
+		return
+	}
+	if req.Balance == nil && req.Delta == nil {
+		Fail(c, CodeParamError, "需提供 balance(覆盖) 或 delta(增减)")
+		return
+	}
+	db, ok := h.db(c)
+	if !ok {
+		return
+	}
+	var m model.Channel
+	if err := db.First(&m, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(c, CodeChNotFound, "渠道不存在")
+			return
+		}
+		h.log.Error("get channel for balance", "err", err)
+		Fail(c, CodeInternal, "查询渠道失败")
+		return
+	}
+	updates := map[string]any{"balance_updated_at": time.Now()}
+	if req.Balance != nil {
+		v, ok := parsePrice(*req.Balance)
+		if !ok {
+			Fail(c, CodeParamError, "balance 必须为 >= 0 的数字")
+			return
+		}
+		updates["balance"] = v
+	} else {
+		d, err := strconv.ParseFloat(strings.TrimSpace(*req.Delta), 64)
+		if err != nil || math.IsNaN(d) || math.IsInf(d, 0) {
+			Fail(c, CodeParamError, "delta 必须为数字")
+			return
+		}
+		cur := 0.0
+		if m.Balance != nil {
+			cur = *m.Balance
+		}
+		updates["balance"] = math.Round((cur+d)*1e8) / 1e8
+	}
+	if err := db.Model(&model.Channel{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		h.log.Error("set channel balance", "err", err)
+		Fail(c, CodeInternal, "调整余额失败")
+		return
+	}
+	if req.Description != nil {
+		h.log.Info("channel balance adjusted", "channel_id", id, "description", *req.Description)
+	}
+	h.notifyChanged(id)
+	_ = db.First(&m, id).Error
+	OK(c, channelToOut(&m))
 }
 
 func pageParams(c *gin.Context) (page, pageSize int) {

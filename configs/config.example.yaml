@@ -40,6 +40,8 @@ routing:
   max_attempts_per_priority: 0  # 每个优先级组最多尝试数, 0=整组
   try_next_priority: true     # 整组失败后降级到下一优先级
   max_total_attempts: 0       # 总尝试上限, 0=不限(受候选数约束)
+  filter_exhausted_channels: true  # 渠道余额 <= 低水位时从路由剔除
+  low_balance_threshold: 0    # 低水位阈值(USD)
 
 billing:
   enabled: true               # 预冻结(Redis) + 结算扣费
