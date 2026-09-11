@@ -2,6 +2,7 @@
 *.local.env
 .env
 .env.*
+data/
 
 # 构建产物
 bin/

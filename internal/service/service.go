@@ -92,11 +92,15 @@ func New(st *store.Store, log *slog.Logger, cfg *config.Config) *Service {
 		s.statsLoc = time.UTC
 	}
 
-	if sec, err := secret.FromEnv(); err != nil {
-		log.Warn("api key encryption key missing", "err", err,
-			"hint", "set "+secret.EnvKey+" to store/read upstream keys")
+	if sec, generated, err := secret.FromEnvOrFile(cfg.Security.APIKeyEncKeyFile); err != nil {
+		log.Warn("api key encryption key unavailable", "err", err,
+			"hint", "set "+secret.EnvKey+" or ensure "+cfg.Security.APIKeyEncKeyFile+" is writable")
 	} else {
 		s.secret = sec
+		if generated {
+			log.Warn("generated a new api key encryption key; keep it safe and backed up",
+				"file", cfg.Security.APIKeyEncKeyFile)
+		}
 	}
 
 	dialTimeout := sec(uc.DialTimeoutSeconds)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,6 +32,49 @@ func FromEnv() (*Secret, error) {
 	if raw == "" {
 		return nil, ErrNotConfigured
 	}
+	return fromBase64(raw)
+}
+
+// FromEnvOrFile 优先使用环境变量 MYAPI_APIKEY_ENC_KEY；否则读取 keyFile；
+// 若 keyFile 不存在则生成随机密钥并写入该文件（generated=true），保证重启后仍可解密。
+func FromEnvOrFile(keyFile string) (s *Secret, generated bool, err error) {
+	if sec, e := FromEnv(); e == nil {
+		return sec, false, nil
+	} else if !errors.Is(e, ErrNotConfigured) {
+		return nil, false, e
+	}
+
+	if keyFile == "" {
+		return nil, false, ErrNotConfigured
+	}
+
+	if raw, e := os.ReadFile(keyFile); e == nil {
+		sec, e2 := fromBase64(strings.TrimSpace(string(raw)))
+		return sec, false, e2
+	} else if !os.IsNotExist(e) {
+		return nil, false, e
+	}
+
+	key := make([]byte, 32)
+	if _, e := rand.Read(key); e != nil {
+		return nil, false, e
+	}
+	encoded := base64.StdEncoding.EncodeToString(key)
+	Zero(key)
+
+	if dir := filepath.Dir(keyFile); dir != "" && dir != "." {
+		if e := os.MkdirAll(dir, 0o700); e != nil {
+			return nil, false, e
+		}
+	}
+	if e := os.WriteFile(keyFile, []byte(encoded), 0o600); e != nil {
+		return nil, false, fmt.Errorf("generate encryption key: %w", e)
+	}
+	sec, e := fromBase64(encoded)
+	return sec, true, e
+}
+
+func fromBase64(raw string) (*Secret, error) {
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, fmt.Errorf("%s must be base64: %w", EnvKey, err)

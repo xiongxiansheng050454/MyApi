@@ -16,7 +16,13 @@ type Config struct {
 	Billing   Billing   `yaml:"billing"`
 	RateLimit RateLimit `yaml:"rate_limit"`
 	Stats     Stats     `yaml:"stats"`
+	Security  Security  `yaml:"security"`
 	Log       Log       `yaml:"log"`
+}
+
+type Security struct {
+	// 上游 api_key 加密密钥文件；环境变量 MYAPI_APIKEY_ENC_KEY 优先。文件不存在时自动生成。
+	APIKeyEncKeyFile string `yaml:"api_key_enc_key_file"`
 }
 
 type Routing struct {
@@ -120,6 +126,7 @@ func Default() *Config {
 		},
 		RateLimit: RateLimit{CacheTTLSeconds: 2, CharsPerToken: 4},
 		Stats:     Stats{FlushIntervalSeconds: 5, Timezone: "UTC", RedisTTLHours: 168},
+		Security:  Security{APIKeyEncKeyFile: "data/apikey_enc.key"},
 		Routing: Routing{
 			StickyEnabled:           true,
 			StickyTTLSeconds:        1800,
