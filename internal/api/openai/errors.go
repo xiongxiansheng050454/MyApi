@@ -3,6 +3,7 @@ package openai
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,7 +27,21 @@ func writeOpenAIError(c *gin.Context, status int, code, typ, message string) {
 	})
 }
 
+func writeRateLimitError(c *gin.Context, code, typ, message string, retryAfter int64) {
+	if retryAfter <= 0 {
+		retryAfter = 1
+	}
+	c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
+	writeOpenAIError(c, http.StatusTooManyRequests, code, typ, message)
+}
+
 func writeServiceError(c *gin.Context, err error) {
+	var rl *service.RateLimitedError
+	if errors.As(err, &rl) {
+		writeRateLimitError(c, "rate_limit_exceeded", "rate_limit_error",
+			"You are sending requests too quickly. Slow down or retry later.", rl.RetryAfter)
+		return
+	}
 	switch {
 	case errors.Is(err, service.ErrInvalidKey):
 		writeOpenAIError(c, http.StatusUnauthorized, "invalid_api_key", "authentication_error", "The api key is invalid.")
@@ -40,6 +55,9 @@ func writeServiceError(c *gin.Context, err error) {
 		writeOpenAIError(c, http.StatusNotFound, "model_not_found", "invalid_request_error", "The model does not exist.")
 	case errors.Is(err, service.ErrNoHealthyUpstream):
 		writeOpenAIError(c, http.StatusBadGateway, "upstream_error", "server_error", "All upstream channels are unavailable.")
+	case errors.Is(err, service.ErrQueueTimeout):
+		writeRateLimitError(c, "engine_overloaded", "server_error",
+			"The request has been waiting too long in the queue.", 0)
 	case errors.Is(err, service.ErrStoreDown):
 		writeOpenAIError(c, http.StatusServiceUnavailable, "internal_error", "server_error", "Gateway backend unavailable.")
 	case errors.Is(err, service.ErrNotImplemented):

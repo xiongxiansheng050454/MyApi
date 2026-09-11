@@ -27,14 +27,17 @@ type Service struct {
 
 	secret        *secret.Secret
 	forwardClient *http.Client
+	counter       counterStore
+	rateCache     *rateRulesCache
 }
 
 func New(st *store.Store, log *slog.Logger, cfg *config.Config) *Service {
 	s := &Service{
-		cfg:   cfg,
-		log:   log,
-		DB:    st.DB,
-		Redis: st.Redis,
+		cfg:       cfg,
+		log:       log,
+		DB:        st.DB,
+		Redis:     st.Redis,
+		rateCache: &rateRulesCache{},
 	}
 
 	sec := func(n int) time.Duration { return time.Duration(n) * time.Second }
@@ -61,6 +64,7 @@ func New(st *store.Store, log *slog.Logger, cfg *config.Config) *Service {
 
 	if st.Redis != nil {
 		s.Limiter = redis_rate.NewLimiter(st.Redis)
+		s.counter = newRedisCounter(st.Redis)
 	}
 
 	if sec, err := secret.FromEnv(); err != nil {

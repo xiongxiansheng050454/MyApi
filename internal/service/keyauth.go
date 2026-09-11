@@ -14,11 +14,12 @@ import (
 )
 
 type KeyIdentity struct {
-	UserID   int64
-	ApiKeyID int64
-	Prefix   string
-	AllowAll bool
-	Models   []string
+	UserID    int64
+	ApiKeyID  int64
+	Prefix    string
+	AllowAll  bool
+	Models    []string
+	Overrides map[string]int64
 }
 
 func HashKey(raw string) string {
@@ -73,6 +74,13 @@ func (s *Service) ResolveKey(ctx context.Context, raw string) (*KeyIdentity, err
 		if m == "*" {
 			ident.AllowAll = true
 			break
+		}
+	}
+
+	if len(key.RateLimitOverrides) > 0 {
+		var ov map[string]int64
+		if err := json.Unmarshal(key.RateLimitOverrides, &ov); err == nil && len(ov) > 0 {
+			ident.Overrides = ov
 		}
 	}
 	return ident, nil

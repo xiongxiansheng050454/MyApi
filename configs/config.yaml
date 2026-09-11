@@ -34,6 +34,10 @@ upstream:
   dial_timeout_seconds: 5    # 上游建连超时
   tls_handshake_timeout_seconds: 5
 
+rate_limit:
+  cache_ttl_seconds: 2   # 限流规则本地缓存刷新
+  chars_per_token: 4     # token 估算系数(仅用于 tpm/tpd 预估计入)
+
 log:
   level: info            # debug / info / warn / error
   format: text           # text / json

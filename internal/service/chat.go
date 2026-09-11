@@ -33,6 +33,18 @@ func (r *CompletionResponse) Close() {
 	})
 }
 
+func (r *CompletionResponse) addRelease(fn func()) {
+	if fn == nil {
+		return
+	}
+	if r.release == nil {
+		r.release = fn
+		return
+	}
+	prev := r.release
+	r.release = func() { prev(); fn() }
+}
+
 func (s *Service) ChatCompletion(ctx context.Context, req *ChatCompletionRequest) (*CompletionResponse, error) {
 	if !req.Key.AllowAll {
 		allowed := false
@@ -47,6 +59,24 @@ func (s *Service) ChatCompletion(ctx context.Context, req *ChatCompletionRequest
 		}
 	}
 
-	// TODO: 接入限流模块（rateLimit 尚为占位，故暂不执行）
-	return s.routeAndForward(ctx, req)
+	release, err := s.rateLimitGate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.routeAndForward(ctx, req)
+	if err != nil {
+		if release != nil {
+			release()
+		}
+		return nil, err
+	}
+	if resp == nil {
+		if release != nil {
+			release()
+		}
+		return nil, ErrNoHealthyUpstream
+	}
+	resp.addRelease(release)
+	return resp, nil
 }
