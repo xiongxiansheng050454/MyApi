@@ -251,7 +251,8 @@ function openModal({ title, bodyHTML = '', fields = null, submitText = '确定',
       submitBtn.textContent = '提交中…';
       try {
         await onSubmit(values);
-        closeModal();
+        // 仅当当前活动弹窗仍是本弹窗时才关闭；若 onSubmit 内又打开了新弹窗（如展示明文 Key），保留新弹窗
+        if (_modalEl === overlay) closeModal();
       } catch (err) {
         Toast(err.message || String(err), 'error');
         submitBtn.disabled = false;

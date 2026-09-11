@@ -279,19 +279,21 @@ async function userKeysModal(user) {
     rows.forEach((k) => {
       body.querySelector(`[data-kid="${k.id}"][data-kact="reset"]`).addEventListener('click', () => Confirm(`重置 Key「${k.key_name}」？旧 Key 将立即失效。`, async () => {
         const out = await adminSend('POST', `/users/${user.id}/keys/${k.id}/reset`, {});
-        showFullKey(out?.full_key, () => userKeysModal(user));
+        showFullKey(out?.full_key, () => { userKeysModal(user); loadKeys(); });
       }));
       body.querySelector(`[data-kid="${k.id}"][data-kact="toggle"]`).addEventListener('click', async () => {
         try {
           await adminSend('PUT', `/users/${user.id}/keys/${k.id}`, { is_active: !k.is_active });
           Toast('状态已更新', 'success');
           userKeysModal(user);
+          loadKeys();
         } catch (e) { Toast(e.message, 'error'); }
       });
       body.querySelector(`[data-kid="${k.id}"][data-kact="del"]`).addEventListener('click', () => Confirm(`删除 Key「${k.key_name}」？`, async () => {
         await adminSend('DELETE', `/users/${user.id}/keys/${k.id}`);
         Toast('已删除', 'success');
         userKeysModal(user);
+        loadKeys();
       }));
     });
   } catch (err) {
@@ -325,7 +327,7 @@ function keyForm(user) {
       }
       if (v.expires_at) body.expires_at = v.expires_at;
       const out = await adminSend('POST', `/users/${user.id}/keys`, body);
-      showFullKey(out?.full_key, () => userKeysModal(user));
+      showFullKey(out?.full_key, () => { userKeysModal(user); loadKeys(); });
     },
   });
 }
