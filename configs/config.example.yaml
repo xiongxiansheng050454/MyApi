@@ -34,9 +34,25 @@ upstream:
   dial_timeout_seconds: 5    # 上游建连超时
   tls_handshake_timeout_seconds: 5
 
+routing:
+  sticky_enabled: true        # 按 user_id 粘性路由（Redis 亲和）
+  sticky_ttl_seconds: 1800    # 亲和有效期
+  max_attempts_per_priority: 0  # 每个优先级组最多尝试数, 0=整组
+  try_next_priority: true     # 整组失败后降级到下一优先级
+  max_total_attempts: 0       # 总尝试上限, 0=不限(受候选数约束)
+
+billing:
+  enabled: true               # 预冻结 + 结算扣费
+  default_output_budget: 1024 # 未传 max_tokens 时冻结用的输出预算
+
 rate_limit:
   cache_ttl_seconds: 2   # 限流规则本地缓存刷新
   chars_per_token: 4     # token 估算系数(仅用于 tpm/tpd 预估计入)
+
+stats:
+  flush_interval_seconds: 5  # Redis 增量刷入 user_daily_stats 的短定时
+  timezone: "UTC"            # 统计自然日时区
+  redis_ttl_hours: 168       # 增量键 TTL
 
 log:
   level: info            # debug / info / warn / error

@@ -12,13 +12,35 @@ type Config struct {
 	Database  Database  `yaml:"database"`
 	Redis     Redis     `yaml:"redis"`
 	Upstream  Upstream  `yaml:"upstream"`
+	Routing   Routing   `yaml:"routing"`
+	Billing   Billing   `yaml:"billing"`
 	RateLimit RateLimit `yaml:"rate_limit"`
+	Stats     Stats     `yaml:"stats"`
 	Log       Log       `yaml:"log"`
+}
+
+type Routing struct {
+	StickyEnabled          bool `yaml:"sticky_enabled"`
+	StickyTTLSeconds       int  `yaml:"sticky_ttl_seconds"`
+	MaxAttemptsPerPriority int  `yaml:"max_attempts_per_priority"`
+	TryNextPriority        bool `yaml:"try_next_priority"`
+	MaxTotalAttempts       int  `yaml:"max_total_attempts"`
+}
+
+type Billing struct {
+	Enabled             bool `yaml:"enabled"`
+	DefaultOutputBudget int  `yaml:"default_output_budget"`
 }
 
 type RateLimit struct {
 	CacheTTLSeconds int `yaml:"cache_ttl_seconds"`
 	CharsPerToken   int `yaml:"chars_per_token"`
+}
+
+type Stats struct {
+	FlushIntervalSeconds int    `yaml:"flush_interval_seconds"`
+	Timezone             string `yaml:"timezone"`
+	RedisTTLHours        int    `yaml:"redis_ttl_hours"`
 }
 
 type Server struct {
@@ -89,7 +111,16 @@ func Default() *Config {
 			TLSHandshakeTimeoutSeconds: 5,
 		},
 		RateLimit: RateLimit{CacheTTLSeconds: 2, CharsPerToken: 4},
-		Log:       Log{Level: "info", Format: "text"},
+		Stats:     Stats{FlushIntervalSeconds: 5, Timezone: "UTC", RedisTTLHours: 168},
+		Routing: Routing{
+			StickyEnabled:          true,
+			StickyTTLSeconds:       1800,
+			MaxAttemptsPerPriority: 0,
+			TryNextPriority:        true,
+			MaxTotalAttempts:       0,
+		},
+		Billing: Billing{Enabled: true, DefaultOutputBudget: 1024},
+		Log:     Log{Level: "info", Format: "text"},
 	}
 }
 

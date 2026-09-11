@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -29,6 +30,15 @@ type Service struct {
 	forwardClient *http.Client
 	counter       counterStore
 	rateCache     *rateRulesCache
+
+	delta       deltaStore
+	daily       dailyAggregator
+	affinity    affinityStore
+	billing     balanceStore
+	statsLoc    *time.Location
+	flushCtx    context.Context
+	flushCancel context.CancelFunc
+	flushWG     sync.WaitGroup
 }
 
 func New(st *store.Store, log *slog.Logger, cfg *config.Config) *Service {
@@ -65,6 +75,18 @@ func New(st *store.Store, log *slog.Logger, cfg *config.Config) *Service {
 	if st.Redis != nil {
 		s.Limiter = redis_rate.NewLimiter(st.Redis)
 		s.counter = newRedisCounter(st.Redis)
+		s.delta = newRedisDeltaStore(st.Redis, int64(cfg.Stats.RedisTTLHours))
+		s.affinity = newRedisAffinity(st.Redis)
+	}
+	if st.DB != nil {
+		s.daily = &gormDaily{db: st.DB}
+		s.billing = &gormBalance{db: st.DB}
+	}
+	if loc, err := time.LoadLocation(cfg.Stats.Timezone); err == nil {
+		s.statsLoc = loc
+	} else {
+		log.Warn("invalid stats.timezone, fallback UTC", "timezone", cfg.Stats.Timezone, "err", err)
+		s.statsLoc = time.UTC
 	}
 
 	if sec, err := secret.FromEnv(); err != nil {
@@ -101,9 +123,13 @@ func (s *Service) Start() {
 	if s.Channels != nil {
 		s.Channels.Start()
 	}
+	if s.delta != nil && s.daily != nil {
+		s.startFlusher()
+	}
 }
 
 func (s *Service) Shutdown() {
+	s.stopFlusher()
 	if s.Channels != nil {
 		s.Channels.Shutdown()
 	}

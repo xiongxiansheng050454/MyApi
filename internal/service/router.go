@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
-	"math/rand"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -32,23 +32,20 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 		return nil, ErrNoHealthyUpstream
 	}
 
-	attempts := s.cfg.Upstream.MaxForwardAttempts
-	if attempts < 1 {
-		attempts = 2
+	var stickyID int64
+	if s.affinity != nil && s.cfg.Routing.StickyEnabled {
+		if id, ok, err := s.affinity.Get(ctx, req.Key.UserID, req.Model); err == nil && ok {
+			stickyID = id
+		}
 	}
-	used := map[int64]bool{}
-	networkAttempts := 0
 
-	for networkAttempts < attempts {
+	ordered := planCandidates(cands, stickyID,
+		s.cfg.Routing.MaxAttemptsPerPriority, s.cfg.Routing.MaxTotalAttempts, s.cfg.Routing.TryNextPriority)
+
+	for _, info := range ordered {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		info, ok := pickNext(cands, used)
-		if !ok {
-			break
-		}
-		used[info.ID] = true
-
 		upstreamName, okUp := s.Channels.UpstreamModel(req.Model, info.ID)
 		if !okUp {
 			continue
@@ -57,13 +54,37 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 		if err != nil {
 			continue
 		}
-		networkAttempts++
+
+		var frozen float64
+		if s.billing != nil && s.cfg.Billing.Enabled {
+			amount, priced := s.estimateFreeze(ctx, info.ID, req)
+			if !priced {
+				if cerr := s.billing.Check(ctx, req.Key.UserID); cerr != nil {
+					handle.Done()
+					return nil, cerr
+				}
+			} else {
+				if ferr := s.billing.Freeze(ctx, req.Key.UserID, amount, req.RequestID); ferr != nil {
+					handle.Done()
+					return nil, ferr
+				}
+				frozen = amount
+			}
+		}
 
 		resp, retryable, ferr := s.forwardOnce(ctx, req, handle, info, upstreamName)
 		if ferr == nil {
+			resp.meta.frozenAmount = frozen
+			resp.meta.balanceFrozen = frozen > 0
+			s.setAffinity(ctx, req.Key.UserID, req.Model, info.ID)
 			return resp, nil
 		}
 		handle.Done()
+		if frozen > 0 {
+			if uerr := s.billing.Unfreeze(context.Background(), req.Key.UserID, req.RequestID, frozen); uerr != nil {
+				s.log.Error("unfreeze after failed attempt", "err", uerr, "request_id", req.RequestID)
+			}
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -73,6 +94,16 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 		s.log.Warn("forward attempt failed", "channel_id", info.ID, "channel", info.Name, "err", ferr)
 	}
 	return nil, ErrNoHealthyUpstream
+}
+
+func (s *Service) setAffinity(ctx context.Context, uid int64, model string, channelID int64) {
+	if s.affinity == nil || !s.cfg.Routing.StickyEnabled {
+		return
+	}
+	ttl := time.Duration(s.cfg.Routing.StickyTTLSeconds) * time.Second
+	if err := s.affinity.Set(ctx, uid, model, channelID, ttl); err != nil {
+		s.log.Debug("set affinity failed", "err", err)
+	}
 }
 
 func (s *Service) forwardOnce(
@@ -98,9 +129,27 @@ func (s *Service) forwardOnce(
 	}
 	defer secret.Zero(key)
 
-	body, err := rewriteModel(req.Body, upstreamName)
+	body, stream, wantsUsage, err := rewriteBody(req.Body, upstreamName)
 	if err != nil {
 		return nil, false, fmt.Errorf("rewrite body: %w", err)
+	}
+	injectedUsage := stream && !wantsUsage
+
+	meta := &usageMeta{
+		userID:         req.Key.UserID,
+		apiKeyID:       req.Key.ApiKeyID,
+		requestID:      req.RequestID,
+		clientIP:       req.ClientIP,
+		model:          req.Model,
+		channelID:      info.ID,
+		upstreamModel:  upstreamName,
+		startedAt:      req.StartedAt,
+		injectedUsage:  injectedUsage,
+		stream:         stream,
+		estimatedInput: int(s.estimateTokens(req.Body)),
+	}
+	if meta.startedAt.IsZero() {
+		meta.startedAt = time.Now()
 	}
 
 	url := strings.TrimRight(info.BaseURL, "/") + "/chat/completions"
@@ -121,12 +170,14 @@ func (s *Service) forwardOnce(
 			_ = resp.Body.Close()
 			return fmt.Errorf("upstream http %d", resp.StatusCode)
 		}
+		meta.statusCode = resp.StatusCode
 		ct := resp.Header.Get("Content-Type")
 		success = &CompletionResponse{
 			StatusCode:  resp.StatusCode,
 			ContentType: ct,
 			body:        resp.Body,
 			release:     handle.Done,
+			meta:        meta,
 		}
 		return nil
 	})
@@ -139,8 +190,30 @@ func (s *Service) forwardOnce(
 		}
 		return nil, true, cbErr
 	}
+
+	if success != nil {
+		if stream || strings.Contains(success.ContentType, "text/event-stream") {
+			success.meta.stream = true
+			success.body = newSSEUsageTee(success.body, meta, injectedUsage)
+		} else {
+			full, rerr := io.ReadAll(io.LimitReader(success.body, maxBufferedBody))
+			_ = success.body.Close()
+			if rerr != nil {
+				return nil, false, fmt.Errorf("read upstream body: %w", rerr)
+			}
+			if in, out, cached, chars, ok := parseUsageJSON(full); ok {
+				meta.setUsage(in, out, cached)
+			} else {
+				meta.addOutputChars(chars)
+			}
+			meta.markFirstByte()
+			success.body = io.NopCloser(bytes.NewReader(full))
+		}
+	}
 	return success, false, nil
 }
+
+const maxBufferedBody = 10 << 20
 
 func (s *Service) loadChannelKey(ctx context.Context, id int64) ([]byte, error) {
 	db := s.WithContext(ctx)
@@ -162,60 +235,26 @@ func (s *Service) loadChannelKey(ctx context.Context, id int64) ([]byte, error) 
 	return s.secret.Decrypt(row.APIKey)
 }
 
-func rewriteModel(body []byte, upstreamModel string) ([]byte, error) {
+func rewriteBody(body []byte, upstreamModel string) (out []byte, stream bool, wantsUsage bool, err error) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
 	m["model"] = upstreamModel
-	out, err := json.Marshal(m)
+	if v, ok := m["stream"].(bool); ok && v {
+		stream = true
+	}
+	if so, ok := m["stream_options"].(map[string]any); ok {
+		if u, ok := so["include_usage"].(bool); ok && u {
+			wantsUsage = true
+		}
+	}
+	if stream && !wantsUsage {
+		m["stream_options"] = map[string]any{"include_usage": true}
+	}
+	out, err = json.Marshal(m)
 	if err != nil {
-		return nil, err
+		return nil, stream, wantsUsage, err
 	}
-	return out, nil
-}
-
-func pickNext(cands []channelmanager.ChannelInfo, used map[int64]bool) (channelmanager.ChannelInfo, bool) {
-	maxP := math.MinInt
-	for _, c := range cands {
-		if used[c.ID] {
-			continue
-		}
-		if c.Priority > maxP {
-			maxP = c.Priority
-		}
-	}
-	var pool []channelmanager.ChannelInfo
-	for _, c := range cands {
-		if !used[c.ID] && c.Priority == maxP {
-			pool = append(pool, c)
-		}
-	}
-	if len(pool) == 0 {
-		return channelmanager.ChannelInfo{}, false
-	}
-	return weightedRandom(pool), true
-}
-
-func weightedRandom(pool []channelmanager.ChannelInfo) channelmanager.ChannelInfo {
-	total := 0
-	for _, c := range pool {
-		w := c.Weight
-		if w <= 0 {
-			w = 100
-		}
-		total += w
-	}
-	pick := rand.Intn(total)
-	for _, c := range pool {
-		w := c.Weight
-		if w <= 0 {
-			w = 100
-		}
-		if pick < w {
-			return c
-		}
-		pick -= w
-	}
-	return pool[0]
+	return out, stream, wantsUsage, nil
 }
