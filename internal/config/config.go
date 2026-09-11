@@ -28,8 +28,11 @@ type Routing struct {
 }
 
 type Billing struct {
-	Enabled             bool `yaml:"enabled"`
-	DefaultOutputBudget int  `yaml:"default_output_budget"`
+	Enabled             bool   `yaml:"enabled"`
+	DefaultOutputBudget int    `yaml:"default_output_budget"`
+	DefaultEncoding     string `yaml:"default_encoding"`
+	BalanceTTLSeconds   int    `yaml:"balance_ttl_seconds"`
+	LockTTLSeconds      int    `yaml:"lock_ttl_seconds"`
 }
 
 type RateLimit struct {
@@ -119,7 +122,7 @@ func Default() *Config {
 			TryNextPriority:        true,
 			MaxTotalAttempts:       0,
 		},
-		Billing: Billing{Enabled: true, DefaultOutputBudget: 1024},
+		Billing: Billing{Enabled: true, DefaultOutputBudget: 1024, DefaultEncoding: "cl100k_base", BalanceTTLSeconds: 3600, LockTTLSeconds: 3},
 		Log:     Log{Level: "info", Format: "text"},
 	}
 }

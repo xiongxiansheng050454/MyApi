@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/go-redis/redis_rate/v9"
 	"gorm.io/gorm"
 
 	"MyApi/internal/channelmanager"
@@ -24,7 +23,6 @@ type Service struct {
 	DB       *gorm.DB
 	Redis    *redis.Client
 	Channels *channelmanager.Manager
-	Limiter  *redis_rate.Limiter
 
 	secret        *secret.Secret
 	forwardClient *http.Client
@@ -34,7 +32,9 @@ type Service struct {
 	delta       deltaStore
 	daily       dailyAggregator
 	affinity    affinityStore
-	billing     balanceStore
+	balance     balanceCache
+	ledger      ledger
+	tokenizer   *tokenizerCache
 	statsLoc    *time.Location
 	flushCtx    context.Context
 	flushCancel context.CancelFunc
@@ -73,15 +73,16 @@ func New(st *store.Store, log *slog.Logger, cfg *config.Config) *Service {
 	s.Channels = channelmanager.New(settings, src, bus, log)
 
 	if st.Redis != nil {
-		s.Limiter = redis_rate.NewLimiter(st.Redis)
 		s.counter = newRedisCounter(st.Redis)
 		s.delta = newRedisDeltaStore(st.Redis, int64(cfg.Stats.RedisTTLHours))
 		s.affinity = newRedisAffinity(st.Redis)
+		s.balance = newRedisBalance(st.Redis, cfg.Billing.BalanceTTLSeconds, cfg.Billing.LockTTLSeconds, s.loadBalanceMicro)
 	}
 	if st.DB != nil {
 		s.daily = &gormDaily{db: st.DB}
-		s.billing = &gormBalance{db: st.DB}
+		s.ledger = &gormLedger{db: st.DB}
 	}
+	s.tokenizer = newTokenizerCache(cfg.Billing.DefaultEncoding)
 	if loc, err := time.LoadLocation(cfg.Stats.Timezone); err == nil {
 		s.statsLoc = loc
 	} else {

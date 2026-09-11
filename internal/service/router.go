@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 	ordered := planCandidates(cands, stickyID,
 		s.cfg.Routing.MaxAttemptsPerPriority, s.cfg.Routing.MaxTotalAttempts, s.cfg.Routing.TryNextPriority)
 
+	attemptNo := 0
 	for _, info := range ordered {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -55,36 +57,31 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 			continue
 		}
 
-		var frozen float64
-		if s.billing != nil && s.cfg.Billing.Enabled {
-			amount, priced := s.estimateFreeze(ctx, info.ID, req)
-			if !priced {
-				if cerr := s.billing.Check(ctx, req.Key.UserID); cerr != nil {
-					handle.Done()
-					return nil, cerr
-				}
-			} else {
-				if ferr := s.billing.Freeze(ctx, req.Key.UserID, amount, req.RequestID); ferr != nil {
-					handle.Done()
-					return nil, ferr
-				}
-				frozen = amount
-			}
+		res, err := s.reserve(ctx, req, info.ID)
+		if err != nil {
+			handle.Done()
+			return nil, err
+		}
+		attemptNo++
+		attemptReqID := req.RequestID
+		if attemptNo > 1 {
+			attemptReqID = fmt.Sprintf("%s#a%d", req.RequestID, attemptNo)
 		}
 
-		resp, retryable, ferr := s.forwardOnce(ctx, req, handle, info, upstreamName)
+		resp, sent, retryable, ferr := s.forwardOnce(ctx, req, handle, info, upstreamName)
 		if ferr == nil {
-			resp.meta.frozenAmount = frozen
-			resp.meta.balanceFrozen = frozen > 0
+			resp.meta.reserve = res
 			s.setAffinity(ctx, req.Key.UserID, req.Model, info.ID)
 			return resp, nil
 		}
 		handle.Done()
-		if frozen > 0 {
-			if uerr := s.billing.Unfreeze(context.Background(), req.Key.UserID, req.RequestID, frozen); uerr != nil {
-				s.log.Error("unfreeze after failed attempt", "err", uerr, "request_id", req.RequestID)
-			}
+
+		if sent {
+			s.settleFailedAttempt(ctx, req, info, upstreamName, attemptReqID, res)
+		} else {
+			s.releaseReservation(ctx, req.Key.UserID, res)
 		}
+
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -94,6 +91,45 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 		s.log.Warn("forward attempt failed", "channel_id", info.ID, "channel", info.Name, "err", ferr)
 	}
 	return nil, ErrNoHealthyUpstream
+}
+
+// settleFailedAttempt 场景2：已发送上游但未获得响应 → 按输入 token 计费。
+func (s *Service) settleFailedAttempt(ctx context.Context, req *ChatCompletionRequest, info channelmanager.ChannelInfo, upstreamName, attemptReqID string, res reservation) {
+	input := int(s.estimateTokens(req.Body, req.Model))
+	pIn, pOut, _ := s.lookupPricing(ctx, info.ID, req.Model)
+	cost := computeCost(input, 0, 0, pIn, pOut, pIn)
+	actualMicro := int64(math.Round(cost * 1e8))
+
+	up := upstreamName
+	row := model.UsageLog{
+		RequestID:            attemptReqID,
+		UserID:               req.Key.UserID,
+		ApiKeyID:             req.Key.ApiKeyID,
+		ChannelID:            info.ID,
+		Model:                req.Model,
+		UpstreamModel:        &up,
+		InputTokens:          input,
+		OutputTokens:         0,
+		UnitPriceInputPer1M:  pIn,
+		UnitPriceOutputPer1M: pOut,
+		TotalCost:            cost,
+		DurationMs:           int(time.Since(req.StartedAt).Milliseconds()),
+		Status:               model.StatusError,
+		ErrorCode:            strPtr("upstream_error"),
+	}
+	if req.ClientIP != "" {
+		ip := req.ClientIP
+		row.ClientIP = &ip
+	}
+	id := s.insertUsageRow(&row)
+
+	if s.cfg.Billing.Enabled && s.ledger != nil {
+		if err := s.ledger.Charge(ctx, req.Key.UserID, attemptReqID, actualMicro); err != nil {
+			s.log.Error("charge failed attempt", "err", err, "request_id", attemptReqID)
+		}
+	}
+	s.settleReservation(ctx, req.Key.UserID, res, actualMicro)
+	s.addUsageDelta(req.Key.UserID, input, 0, 0, actualMicro, false, id)
 }
 
 func (s *Service) setAffinity(ctx context.Context, uid int64, model string, channelID int64) {
@@ -112,26 +148,23 @@ func (s *Service) forwardOnce(
 	handle *channelmanager.Handle,
 	info channelmanager.ChannelInfo,
 	upstreamName string,
-) (*CompletionResponse, bool /*retryable*/, error) {
+) (*CompletionResponse, bool /*sent*/, bool /*retryable*/, error) {
 	if info.AuthType != "" && info.AuthType != "bearer" {
-		return nil, true, fmt.Errorf("unsupported auth_type %q", info.AuthType)
+		return nil, false, true, fmt.Errorf("unsupported auth_type %q", info.AuthType)
 	}
 
 	key, err := s.loadChannelKey(ctx, info.ID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, errChannelGone) {
-			return nil, true, err
+			return nil, false, true, err
 		}
-		if errors.Is(err, secret.ErrNotConfigured) || errors.Is(err, secret.ErrPlaintext) {
-			return nil, false, err
-		}
-		return nil, false, err
+		return nil, false, false, err
 	}
 	defer secret.Zero(key)
 
 	body, stream, wantsUsage, err := rewriteBody(req.Body, upstreamName)
 	if err != nil {
-		return nil, false, fmt.Errorf("rewrite body: %w", err)
+		return nil, false, false, fmt.Errorf("rewrite body: %w", err)
 	}
 	injectedUsage := stream && !wantsUsage
 
@@ -146,8 +179,9 @@ func (s *Service) forwardOnce(
 		startedAt:      req.StartedAt,
 		injectedUsage:  injectedUsage,
 		stream:         stream,
-		estimatedInput: int(s.estimateTokens(req.Body)),
+		estimatedInput: int(s.estimateTokens(req.Body, req.Model)),
 	}
+	meta.count = func(text string) int { return s.tokenizer.count(req.Model, text) }
 	if meta.startedAt.IsZero() {
 		meta.startedAt = time.Now()
 	}
@@ -155,13 +189,15 @@ func (s *Service) forwardOnce(
 	url := strings.TrimRight(info.BaseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, true, fmt.Errorf("build upstream request: %w", err)
+		return nil, false, true, fmt.Errorf("build upstream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+string(key))
 
+	sent := false
 	var success *CompletionResponse
 	cbErr := handle.Execute(func() error {
+		sent = true
 		resp, derr := s.forwardClient.Do(httpReq)
 		if derr != nil {
 			return derr
@@ -183,12 +219,9 @@ func (s *Service) forwardOnce(
 	})
 	if cbErr != nil {
 		if ctx.Err() != nil {
-			return nil, false, ctx.Err()
+			return nil, sent, false, ctx.Err()
 		}
-		if errors.Is(cbErr, channelmanager.ErrCircuitOpen) {
-			return nil, true, cbErr
-		}
-		return nil, true, cbErr
+		return nil, sent, true, cbErr
 	}
 
 	if success != nil {
@@ -199,18 +232,19 @@ func (s *Service) forwardOnce(
 			full, rerr := io.ReadAll(io.LimitReader(success.body, maxBufferedBody))
 			_ = success.body.Close()
 			if rerr != nil {
-				return nil, false, fmt.Errorf("read upstream body: %w", rerr)
+				return nil, true, false, fmt.Errorf("read upstream body: %w", rerr)
 			}
-			if in, out, cached, chars, ok := parseUsageJSON(full); ok {
+			if in, out, cached, content, ok := parseUsageJSON(full); ok {
 				meta.setUsage(in, out, cached)
 			} else {
-				meta.addOutputChars(chars)
+				meta.outputText = content
 			}
 			meta.markFirstByte()
+			full = rewriteResponseModel(full, req.Model)
 			success.body = io.NopCloser(bytes.NewReader(full))
 		}
 	}
-	return success, false, nil
+	return success, sent, false, nil
 }
 
 const maxBufferedBody = 10 << 20

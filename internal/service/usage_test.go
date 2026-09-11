@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -27,12 +28,12 @@ func TestComputeCost(t *testing.T) {
 
 func TestParseUsageJSON(t *testing.T) {
 	body := []byte(`{"id":"x","choices":[{"message":{"role":"assistant","content":"hello"}}],"usage":{"prompt_tokens":10,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":4}}}`)
-	in, out, cached, chars, ok := parseUsageJSON(body)
-	if !ok || in != 10 || out != 3 || cached != 4 || chars != 5 {
-		t.Fatalf("got in=%d out=%d cached=%d chars=%d ok=%v", in, out, cached, chars, ok)
+	in, out, cached, content, ok := parseUsageJSON(body)
+	if !ok || in != 10 || out != 3 || cached != 4 || content != "hello" {
+		t.Fatalf("got in=%d out=%d cached=%d content=%q ok=%v", in, out, cached, content, ok)
 	}
-	if _, _, _, chars, ok := parseUsageJSON([]byte(`{"choices":[{"message":{"content":"abcdef"}}]}`)); ok || chars != 6 {
-		t.Fatalf("expected no usage, chars=6, got ok=%v chars=%d", ok, chars)
+	if _, _, _, content, ok := parseUsageJSON([]byte(`{"choices":[{"message":{"content":"abcdef"}}]}`)); ok || content != "abcdef" {
+		t.Fatalf("expected no usage, content=abcdef, got ok=%v content=%q", ok, content)
 	}
 }
 
@@ -44,7 +45,7 @@ const sseUsageOnly = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"com
 
 func TestSSETeeStripsInjectedUsage(t *testing.T) {
 	stream := makeSSEChunk("Hel") + makeSSEChunk("lo") + sseUsageOnly + "data: [DONE]\n\n"
-	meta := &usageMeta{startedAt: time.Now()}
+	meta := &usageMeta{startedAt: time.Now(), count: func(s string) int { return len(s) }}
 	tee := newSSEUsageTee(strings.NewReader(stream), meta, true)
 	out, err := io.ReadAll(tee)
 	if err != nil {
@@ -59,8 +60,42 @@ func TestSSETeeStripsInjectedUsage(t *testing.T) {
 	if !meta.usageKnown || meta.inputTokens != 9 || meta.outputTokens != 2 || meta.cachedTokens != 1 {
 		t.Fatalf("usage not captured: %+v", meta)
 	}
-	if meta.outputChars != 5 {
-		t.Fatalf("outputChars=%d want 5", meta.outputChars)
+	if meta.outputTokensEst != 5 {
+		t.Fatalf("outputTokensEst=%d want 5", meta.outputTokensEst)
+	}
+}
+
+func TestRewriteResponseModel(t *testing.T) {
+	body := []byte(`{"id":"x","model":"deepseek-flash","system_fingerprint":"abc","choices":[]}`)
+	out := rewriteResponseModel(body, "gpt-4")
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["model"] != "gpt-4" {
+		t.Fatalf("model not rewritten: %v", m["model"])
+	}
+	if _, ok := m["system_fingerprint"]; ok {
+		t.Fatal("system_fingerprint should be removed")
+	}
+	// 无 model 字段的响应（如错误体）原样返回
+	plain := []byte(`{"error":{"message":"x"}}`)
+	if string(rewriteResponseModel(plain, "gpt-4")) != string(plain) {
+		t.Fatal("body without model should be unchanged")
+	}
+}
+
+func TestSSETeeRewritesModel(t *testing.T) {
+	stream := makeSSEChunk("hi") + sseUsageOnly + "data: [DONE]\n\n"
+	meta := &usageMeta{startedAt: time.Now(), model: "gpt-4"}
+	tee := newSSEUsageTee(strings.NewReader(stream), meta, true)
+	out, _ := io.ReadAll(tee)
+	s := string(out)
+	if strings.Contains(s, "deepseek") || strings.Contains(s, `"model":"gpt-4"`) == false {
+		t.Fatalf("stream chunk model should be rewritten: %s", s)
+	}
+	if strings.Contains(s, `"usage"`) {
+		t.Fatal("usage-only frame should still be stripped")
 	}
 }
 

@@ -4,4 +4,4 @@ Web 框架：gin
 ORM / SQL 生成器：gorm
 分布式缓存与状态存储：Redis
 熔断与降级：gobreaker
-分布式限流：go-redis/redis_rate/v9
+分布式限流：自研 Redis 滑动窗口（当前桶 + 前一个桶按过期比例估算）

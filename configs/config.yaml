@@ -42,8 +42,11 @@ routing:
   max_total_attempts: 0       # 总尝试上限, 0=不限(受候选数约束)
 
 billing:
-  enabled: true               # 预冻结 + 结算扣费
+  enabled: true               # 预冻结(Redis) + 结算扣费
   default_output_budget: 1024 # 未传 max_tokens 时冻结用的输出预算
+  default_encoding: "cl100k_base"  # 未知模型分词回退编码
+  balance_ttl_seconds: 3600   # Redis 余额缓存 TTL
+  lock_ttl_seconds: 3         # 余额缓存重建锁 TTL
 
 rate_limit:
   cache_ttl_seconds: 2   # 限流规则本地缓存刷新
