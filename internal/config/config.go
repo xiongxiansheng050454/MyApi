@@ -50,9 +50,11 @@ type Stats struct {
 }
 
 type Server struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
-	Mode string `yaml:"mode"`
+	Host         string `yaml:"host"`
+	Port         int    `yaml:"port"`
+	Mode         string `yaml:"mode"`
+	DashboardDir string `yaml:"dashboard_dir"`
+	DocsDir      string `yaml:"docs_dir"`
 }
 
 type Database struct {
@@ -96,7 +98,7 @@ type Log struct {
 
 func Default() *Config {
 	return &Config{
-		Server: Server{Host: "0.0.0.0", Port: 8080, Mode: "debug"},
+		Server: Server{Host: "0.0.0.0", Port: 8080, Mode: "debug", DashboardDir: "dashboard", DocsDir: "docs"},
 		Database: Database{
 			Enabled: true, Host: "127.0.0.1", Port: 5432,
 			User: "postgres", Password: "postgres", Name: "myapi",
