@@ -96,6 +96,24 @@ async function adminGet(path, params = {}) {
   return json.data;
 }
 
+/** 管理端写操作：统一解析 {code,message,data}，code!=0 抛错 */
+async function adminSend(method, path, body) {
+  const base = dashboardApiBase();
+  const url = new URL(base + path, window.location.origin);
+  const opts = { method, headers: { Accept: 'application/json' } };
+  if (body !== undefined && body !== null) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(url.toString(), opts);
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
+  if (json && json.code !== 0) throw new Error(json.message || `${path} 操作失败`);
+  return json ? json.data : null;
+}
+
 async function loadDashboardData() {
   const end = new Date();
   const start = daysAgoDate(6);

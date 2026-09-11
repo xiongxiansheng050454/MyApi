@@ -192,3 +192,328 @@ function DonutChart(items, { size = 168, thickness = 20 } = {}) {
       </ul>
     </div>`);
 }
+
+/* ============================================================
+   管理交互组件：Toast / Modal / Form / Confirm / EmptyState / Pagination
+   ============================================================ */
+
+/** 顶部通知 */
+function Toast(message, type = 'info') {
+  const root = document.getElementById('toast-root');
+  if (!root) return;
+  const tones = {
+    info: 'border-zinc-700 text-zinc-200',
+    success: 'border-emerald-400/40 text-emerald-300',
+    error: 'border-rose-400/40 text-rose-300',
+  };
+  const node = el(`<div class="toast rounded-lg border bg-zinc-900/95 px-4 py-2.5 text-xs shadow-2xl ${tones[type] || tones.info}">${message}</div>`);
+  root.append(node);
+  setTimeout(() => {
+    node.style.opacity = '0';
+    node.style.transform = 'translateY(-6px)';
+    setTimeout(() => node.remove(), 200);
+  }, 2600);
+}
+
+let _modalEl = null;
+
+/** 打开弹窗；fields 存在时渲染表单，onSubmit(values) 抛错则不关闭并提示 */
+function openModal({ title, bodyHTML = '', fields = null, submitText = '确定', onSubmit = null, width = 'max-w-lg' }) {
+  closeModal();
+  const root = document.getElementById('modal-root');
+  if (!root) return null;
+  const body = fields ? renderForm(fields) : bodyHTML;
+  const overlay = el(`
+    <div class="modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div class="modal-card w-full ${width} rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+        <div class="flex items-center justify-between border-b border-zinc-800 px-5 py-3.5">
+          <h3 class="text-sm font-semibold">${title}</h3>
+          <button data-close class="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">✕</button>
+        </div>
+        <div class="max-h-[65vh] overflow-y-auto px-5 py-4" data-body>${body}</div>
+        <div class="flex justify-end gap-2 border-t border-zinc-800 px-5 py-3.5">
+          <button data-close class="btn btn-ghost rounded-lg border border-zinc-800 px-3.5 py-2 text-xs font-semibold text-zinc-400">取消</button>
+          ${onSubmit ? `<button data-submit class="btn btn-primary rounded-lg px-3.5 py-2 text-xs font-bold">${submitText}</button>` : ''}
+        </div>
+      </div>
+    </div>`);
+  root.append(overlay);
+  _modalEl = overlay;
+  overlay.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeModal));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+  const submitBtn = overlay.querySelector('[data-submit]');
+  if (submitBtn && onSubmit) {
+    submitBtn.addEventListener('click', async () => {
+      const values = fields ? collectForm(overlay, fields) : {};
+      submitBtn.disabled = true;
+      const original = submitBtn.textContent;
+      submitBtn.textContent = '提交中…';
+      try {
+        await onSubmit(values);
+        closeModal();
+      } catch (err) {
+        Toast(err.message || String(err), 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = original;
+      }
+    });
+  }
+  return overlay;
+}
+
+function closeModal() {
+  if (_modalEl) { _modalEl.remove(); _modalEl = null; }
+}
+
+/** 确认框 */
+function Confirm(message, onConfirm) {
+  openModal({
+    title: '确认操作',
+    bodyHTML: `<p class="text-sm leading-relaxed text-zinc-300">${message}</p>`,
+    submitText: '确认',
+    onSubmit: async () => { await onConfirm(); },
+  });
+}
+
+/** 表单渲染：fields = [{name,label,type,value,options,placeholder,required,help,switchLabel}] */
+function renderForm(fields) {
+  return `<div class="grid gap-3">` + fields.map((f) => {
+    const id = 'f_' + f.name;
+    let input;
+    if (f.type === 'select') {
+      input = `<select id="${id}" data-name="${f.name}" class="form-input">${(f.options || []).map((o) =>
+        `<option value="${o.value}" ${String(o.value) === String(f.value) ? 'selected' : ''}>${o.label}</option>`).join('')}</select>`;
+    } else if (f.type === 'textarea') {
+      input = `<textarea id="${id}" data-name="${f.name}" rows="3" class="form-input" placeholder="${f.placeholder || ''}">${f.value ?? ''}</textarea>`;
+    } else if (f.type === 'switch') {
+      input = `<label class="inline-flex items-center gap-2"><input id="${id}" data-name="${f.name}" type="checkbox" class="form-switch" ${f.value ? 'checked' : ''}/><span class="text-xs text-zinc-400">${f.switchLabel || '启用'}</span></label>`;
+    } else {
+      input = `<input id="${id}" data-name="${f.name}" type="${f.type || 'text'}" value="${f.value ?? ''}" class="form-input" placeholder="${f.placeholder || ''}"/>`;
+    }
+    return `<label class="block"><span class="mb-1 block text-xs font-medium text-zinc-400">${f.label}${f.required ? ' <span class="text-rose-400">*</span>' : ''}</span>${input}${f.help ? `<span class="mt-1 block text-[10px] text-zinc-500">${f.help}</span>` : ''}</label>`;
+  }).join('') + `</div>`;
+}
+
+function collectForm(scope, fields) {
+  const out = {};
+  fields.forEach((f) => {
+    const node = scope.querySelector(`[data-name="${f.name}"]`);
+    if (!node) return;
+    if (f.type === 'switch') out[f.name] = node.checked;
+    else if (f.type === 'number') { const v = node.value.trim(); out[f.name] = v === '' ? null : Number(v); }
+    else out[f.name] = node.value.trim();
+  });
+  return out;
+}
+
+/** 空状态（可带引导按钮） */
+function EmptyState({ title = '暂无数据', desc = '', actionLabel = '', onAction = null, icon = 'logs' }) {
+  const wrap = el(`
+    <div class="flex flex-col items-center gap-3 py-12 text-center">
+      <div class="grid h-12 w-12 place-items-center rounded-2xl bg-zinc-800/60 text-zinc-500">${Icon(icon, 'h-5 w-5')}</div>
+      <div class="text-sm font-semibold text-zinc-300">${title}</div>
+      ${desc ? `<div class="text-xs text-zinc-500">${desc}</div>` : ''}
+      ${actionLabel ? `<button data-empty-action class="btn btn-primary mt-1 rounded-lg px-3.5 py-2 text-xs font-bold">${actionLabel}</button>` : ''}
+    </div>`);
+  if (actionLabel && onAction) wrap.querySelector('[data-empty-action]').addEventListener('click', onAction);
+  return wrap;
+}
+
+/** 分页控件 */
+function Pagination({ page, pageSize, total, onChange }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const wrap = el(`
+    <div class="flex items-center justify-between gap-3 pt-3 text-xs text-zinc-500">
+      <span>共 ${total} 条 · 第 ${page}/${pages} 页</span>
+      <div class="flex gap-2">
+        <button data-prev class="btn btn-ghost rounded-lg border border-zinc-800 px-3 py-1.5 disabled:opacity-40" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+        <button data-next class="btn btn-ghost rounded-lg border border-zinc-800 px-3 py-1.5 disabled:opacity-40" ${page >= pages ? 'disabled' : ''}>下一页</button>
+      </div>
+    </div>`);
+  wrap.querySelector('[data-prev]').addEventListener('click', () => { if (page > 1) onChange(page - 1); });
+  wrap.querySelector('[data-next]').addEventListener('click', () => { if (page < pages) onChange(page + 1); });
+  return wrap;
+}
+
+/** 复制到剪贴板并提示 */
+function copyText(text, label = '已复制') {
+  const done = () => Toast(label, 'success');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => Toast('复制失败，请手动选择', 'error'));
+  } else {
+    Toast('当前环境不支持自动复制', 'error');
+  }
+}
+
+/* ============================================================
+   共享表格 / 列表片段（多视图复用）
+   ============================================================ */
+function logsTableHTML(logs) {
+  if (!logs || !logs.length) return `<div class="py-10 text-center text-xs text-zinc-500">暂无请求日志</div>`;
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead>
+          <tr class="border-b border-zinc-800 text-[11px] uppercase tracking-wide text-zinc-500">
+            <th class="pb-2.5 pr-4 font-medium">时间</th>
+            <th class="pb-2.5 pr-4 font-medium">用户 / 模型</th>
+            <th class="pb-2.5 pr-4 font-medium">路由渠道</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">Tokens</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">TTFT</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">耗时</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">费用</th>
+            <th class="pb-2.5 font-medium text-right">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${logs.map((l) => `
+            <tr class="row-hover border-b border-zinc-800/50">
+              <td class="py-2.5 pr-4 font-mono text-zinc-500">${l.created_at}</td>
+              <td class="py-2.5 pr-4">
+                <div class="font-semibold">${l.user}</div>
+                <div class="font-mono text-[10px] text-zinc-500">${l.model}</div>
+              </td>
+              <td class="py-2.5 pr-4 text-zinc-400">${l.channel}</td>
+              <td class="py-2.5 pr-4 text-right font-mono text-zinc-300">${(l.input_tokens + l.output_tokens).toLocaleString()}</td>
+              <td class="py-2.5 pr-4 text-right font-mono text-zinc-300">${l.ttft_ms ? l.ttft_ms + 'ms' : '—'}</td>
+              <td class="py-2.5 pr-4 text-right font-mono text-zinc-300">${(l.duration_ms / 1000).toFixed(1)}s</td>
+              <td class="py-2.5 pr-4 text-right font-mono font-semibold ${l.status === 'success' ? 'text-cyan-400' : 'text-zinc-600'}">$${l.total_cost}</td>
+              <td class="py-2.5 text-right">${l.status === 'success' ? Badge('成功', 'success') : Badge(l.error_code || '失败', 'error')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function channelListHTML(channels) {
+  if (!channels || !channels.length) return `<div class="py-10 text-center text-xs text-zinc-500">暂无渠道</div>`;
+  return channels.map((c) => {
+    const disabled = c.status === 0;
+    const warn = c.health < 95;
+    const circuitBadge = disabled
+      ? Badge('已停用', 'neutral')
+      : c.circuit === 'half-open' ? Badge('半开探测', 'warning')
+      : Badge('熔断关闭', 'success');
+    const balance = c.balance == null ? '不限' : `$${Number(c.balance).toFixed(4)}`;
+    return `
+      <div class="group rounded-lg border border-transparent p-2 -m-2 transition hover:border-zinc-800 hover:bg-zinc-800/40 ${disabled ? 'opacity-45' : ''}">
+        <div class="mb-1.5 flex items-center gap-2">
+          <span class="h-1.5 w-1.5 rounded-full ${disabled ? 'bg-zinc-500' : warn ? 'bg-amber-400' : 'bg-emerald-400 dot-live text-emerald-400'}"></span>
+          <span class="flex-1 truncate text-xs font-semibold">${c.name}</span>
+          ${circuitBadge}
+        </div>
+        ${ProgressBar({ value: c.health, warn, label: `健康度 · 权重 ${c.weight} / 优先级 ${c.priority}`, right: c.health.toFixed(1) + '%' })}
+        <div class="mt-1.5 flex items-center justify-between font-mono text-[10px] text-zinc-500">
+          <span>${c.rpm} rpm</span>
+          <span>余额 ${balance}</span>
+          <span>$${c.cost_24h.toFixed(2)} / 24h</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function usersListHTML(users) {
+  if (!users || !users.length) return `<div class="py-10 text-center text-xs text-zinc-500">暂无用户</div>`;
+  return users.map((u) => `
+    <div class="row-hover flex items-center gap-3 rounded-lg px-2 py-2 -mx-2">
+      <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-zinc-600 to-zinc-800 text-[11px] font-bold text-zinc-200">${String(u.name).slice(0, 2).toUpperCase()}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <span class="truncate text-xs font-semibold">${u.name}</span>
+          ${u.group === 'vip' ? Badge('VIP', 'cyan') : u.group === 'free' ? Badge('免费', 'neutral') : ''}
+          ${u.status !== 'active' ? Badge('冻结', 'error') : ''}
+        </div>
+        <div class="mt-0.5 font-mono text-[10px] text-zinc-500">
+          可用 <span class="text-zinc-300">$${u.available_balance}</span> · 冻结 $${u.frozen_balance} · 今日 ${u.qpd.toLocaleString()} 次
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function progressListHTML(items) {
+  if (!items || !items.length) return `<div class="py-6 text-center text-xs text-zinc-500">暂无数据</div>`;
+  return items.map((r) => ProgressBar({
+    value: r.usage,
+    warn: r.usage >= 90,
+    label: `<span class="font-semibold text-zinc-300">${r.target}</span> <span class="text-zinc-600">· ${r.scope}</span>`,
+    right: r.usage + '%',
+  })).join('');
+}
+
+function pricingTableHTML(rows) {
+  if (!rows || !rows.length) return `<div class="py-10 text-center text-xs text-zinc-500">暂无定价记录</div>`;
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead>
+          <tr class="border-b border-zinc-800 text-[11px] uppercase tracking-wide text-zinc-500">
+            <th class="pb-2.5 pr-4 font-medium">渠道</th>
+            <th class="pb-2.5 pr-4 font-medium">对外模型</th>
+            <th class="pb-2.5 pr-4 font-medium">上游模型</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">输入 / 1M</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">输出 / 1M</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">缓存输入 / 1M</th>
+            <th class="pb-2.5 font-medium text-right">币种</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((p) => `
+            <tr class="row-hover border-b border-zinc-800/50">
+              <td class="py-2.5 pr-4">${p.channel_name || ('#' + p.channel_id)}</td>
+              <td class="py-2.5 pr-4 font-semibold">${p.model_name}</td>
+              <td class="py-2.5 pr-4 font-mono text-[10px] text-zinc-500">${p.upstream_model || '—'}</td>
+              <td class="py-2.5 pr-4 text-right font-mono text-zinc-300">$${p.input_price_per_1m}</td>
+              <td class="py-2.5 pr-4 text-right font-mono text-zinc-300">$${p.output_price_per_1m}</td>
+              <td class="py-2.5 pr-4 text-right font-mono text-zinc-500">${p.cached_input_price_per_1m ? '$' + p.cached_input_price_per_1m : '—'}</td>
+              <td class="py-2.5 text-right text-zinc-400">${p.currency}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function keysTableHTML(rows) {
+  if (!rows || !rows.length) return `<div class="py-10 text-center text-xs text-zinc-500">暂无 Key</div>`;
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead>
+          <tr class="border-b border-zinc-800 text-[11px] uppercase tracking-wide text-zinc-500">
+            <th class="pb-2.5 pr-4 font-medium">名称</th>
+            <th class="pb-2.5 pr-4 font-medium">用户</th>
+            <th class="pb-2.5 pr-4 font-medium">前缀</th>
+            <th class="pb-2.5 pr-4 font-medium text-right">状态</th>
+            <th class="pb-2.5 font-medium text-right">最后使用</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((k) => `
+            <tr class="row-hover border-b border-zinc-800/50">
+              <td class="py-2.5 pr-4 font-semibold">${k.key_name}</td>
+              <td class="py-2.5 pr-4 text-zinc-400">#${k.user_id}</td>
+              <td class="py-2.5 pr-4 font-mono text-[10px] text-zinc-500">${k.prefix}</td>
+              <td class="py-2.5 pr-4 text-right">${k.is_active ? Badge('启用', 'success') : Badge('停用', 'neutral')}</td>
+              <td class="py-2.5 text-right font-mono text-[10px] text-zinc-500">${k.last_used_at ? shortTime(k.last_used_at) : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function modelCatalogHTML(rows) {
+  if (!rows || !rows.length) return `<div class="py-10 text-center text-xs text-zinc-500">暂无已发布模型</div>`;
+  return `<div class="space-y-2">
+    ${rows.map((m) => `
+      <div class="row-hover flex items-center justify-between rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-3 py-2.5">
+        <div class="min-w-0">
+          <div class="truncate text-xs font-semibold">${m.model_name}</div>
+          <div class="mt-0.5 font-mono text-[10px] text-zinc-500">${(m.channels || []).map((c) => c.channel_name).join(' · ') || '无渠道'}</div>
+        </div>
+        <div class="text-right">
+          <div class="font-mono text-sm font-bold text-white">${m.channel_count ?? (m.channels || []).length}</div>
+          <div class="text-[10px] text-zinc-500">可用渠道</div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
