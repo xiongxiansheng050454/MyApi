@@ -16,6 +16,7 @@ let NOTIFICATIONS = [];
 let API_DOCS = docsLinks();
 let ROUTING_OVERVIEW = [];
 let ERROR_MIX = [];
+let MODEL_CATALOG = [];
 
 function dashboardApiBase() {
   const params = new URLSearchParams(window.location.search);
@@ -125,6 +126,7 @@ async function loadDashboardData() {
   ROUTING_OVERVIEW = normalizeRouting(CHANNELS, models?.list || []);
   NOTIFICATIONS = buildNotifications(CHANNELS, ERROR_MIX, OVERVIEW);
   API_DOCS = docsLinks();
+  MODEL_CATALOG = models?.list || [];
 }
 
 function normalizeOverview(data) {
