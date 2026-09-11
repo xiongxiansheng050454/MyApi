@@ -11,6 +11,7 @@ type Config struct {
 	Server   Server   `yaml:"server"`
 	Database Database `yaml:"database"`
 	Redis    Redis    `yaml:"redis"`
+	Upstream Upstream `yaml:"upstream"`
 	Log      Log      `yaml:"log"`
 }
 
@@ -40,6 +41,20 @@ type Redis struct {
 	DB       int    `yaml:"db"`
 }
 
+type Upstream struct {
+	CacheTTLSeconds            int    `yaml:"cache_ttl_seconds"`
+	RetireGraceSeconds         int    `yaml:"retire_grace_seconds"`
+	EventsChannel              string `yaml:"events_channel"`
+	BreakerMaxRequests         uint32 `yaml:"breaker_max_requests"`
+	BreakerIntervalSeconds     int    `yaml:"breaker_interval_seconds"`
+	BreakerTimeoutSeconds      int    `yaml:"breaker_timeout_seconds"`
+	BreakerConsecutiveFailures uint32 `yaml:"breaker_consecutive_failures"`
+	MaxForwardAttempts         int    `yaml:"max_forward_attempts"`
+	HealthTimeoutSeconds       int    `yaml:"health_timeout_seconds"`
+	DialTimeoutSeconds         int    `yaml:"dial_timeout_seconds"`
+	TLSHandshakeTimeoutSeconds int    `yaml:"tls_handshake_timeout_seconds"`
+}
+
 type Log struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
@@ -54,7 +69,20 @@ func Default() *Config {
 			SSLMode: "disable", MaxOpenConns: 20, MaxIdleConns: 10, AutoMigrate: false,
 		},
 		Redis: Redis{Enabled: true, Addr: "127.0.0.1:6379", DB: 0},
-		Log:   Log{Level: "info", Format: "text"},
+		Upstream: Upstream{
+			CacheTTLSeconds:            3,
+			RetireGraceSeconds:         600,
+			EventsChannel:              "myapi:channel:events",
+			BreakerMaxRequests:         1,
+			BreakerIntervalSeconds:     0,
+			BreakerTimeoutSeconds:      30,
+			BreakerConsecutiveFailures: 5,
+			MaxForwardAttempts:         2,
+			HealthTimeoutSeconds:       8,
+			DialTimeoutSeconds:         5,
+			TLSHandshakeTimeoutSeconds: 5,
+		},
+		Log: Log{Level: "info", Format: "text"},
 	}
 }
 

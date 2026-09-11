@@ -54,6 +54,7 @@
 ```
 
 > `api_key` 永不明文回显，只提供掩码 `api_key_masked`（保留末 4 位）。
+> **存储**：`api_key` 以 `enc:v1:` 前缀密文入库（AES-256-GCM，密钥取环境变量 `MYAPI_APIKEY_ENC_KEY`，不落库/不落 git）；仅在调用上游时解密、用完清零。历史明文行需先执行 `cmd/migrate-enc`（严格迁移，未迁移会返回错误）。
 
 ### 1.2 渠道列表
 
@@ -95,21 +96,74 @@
 
 级联删除该渠道的 `channel_models` 与 `model_pricing`；历史 `usage_logs` 保留（可审计）。存在进行中请求时建议先停用再删。
 
-### 1.7 连通性测试
+### 1.7 健康检查（真实 chat 调用）
 
 `POST /admin/channels/{channelId}/test`
 
-网关用渠道配置发起一次最小探测请求（如 `GET {base_url}/models`），返回：
+请求体（可选）：
+
+```json
+{ "model": "deepseek-chat", "check_all": false }
+```
+
+- `model`：指定要检查的对外模型别名（可选）。
+- `check_all=true`：遍历该渠道**全部 enabled 映射**分别检查并返回数组。
+- 缺省（不带 `model` 且 `check_all=false`）：只检查该渠道**第一个 enabled 映射**。
+
+对每个被检查模型，网关发起一次真实 `POST {base_url}/chat/completions`，请求体固定为：
+
+```json
+{ "model": "<upstream_model>", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1, "stream": false }
+```
+
+- 硬超时：`upstream.health_timeout_seconds`（默认 8s），整体 `recover` 捕获 panic。
+- 单模型返回 `data`：
+
+```json
+{
+  "model_alias": "deepseek-chat",
+  "upstream_model": "deepseek-chat",
+  "ok": true,
+  "latency_ms": 320,
+  "http_status": 200,
+  "error": null,
+  "usage": { "prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4 }
+}
+```
+
+- `check_all=true` 返回 `data`: `{ "check_all": true, "list": [上述对象, ...] }`。
+- 失败时对应项 `ok=false`，`error` 为上游错误体片段/网络原因。该检查会产生极小真实费用（max_tokens=1）。
+
+### 1.8 拉取上游模型列表
+
+用于前端填表选择模型别名对应的上游模型。
+
+按已有渠道（读库内配置 + 解密密钥）：
+
+`POST /admin/channels/{channelId}/remote-models`
+
+填表前预览（base_url + api_key 仅本次使用、不入库，兼容历史明文输入）：
+
+`POST /admin/remote-models`
+
+```json
+{ "base_url": "https://api.deepseek.com", "api_key": "sk-..." }
+```
+
+`data` 均为：
 
 ```json
 {
   "ok": true,
-  "latency_ms": 320,
+  "latency_ms": 260,
+  "models": [
+    { "id": "deepseek-chat", "object": "model", "owned_by": "deepseek" }
+  ],
   "error": null
 }
 ```
 
-失败时 `ok=false`，`error` 为原因（鉴权失败 / 超时 / 网络错误等）。测试不产生费用、不改动熔断状态。
+失败时 `ok=false`、`error` 描述原因（鉴权失败 / 超时 / 未迁移明文等）。
 
 ---
 
