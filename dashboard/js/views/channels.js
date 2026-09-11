@@ -182,9 +182,9 @@ function channelTest(ch) {
   openModal({
     title: `连通性测试 · ${ch.name}`,
     submitText: '开始测试',
-    fields: [{ name: 'check_all', type: 'switch', value: false, switchLabel: '检查全部启用模型' }],
+    fields: [{ name: 'check_all', type: 'switch', value: true, switchLabel: '检查全部启用模型（默认开启）' }],
     onSubmit: async (v) => {
-      const r = await adminSend('POST', `/channels/${ch.id}/test`, { check_all: !!v.check_all });
+      const r = await adminSend('POST', `/channels/${ch.id}/test`, { check_all: v.check_all !== false });
       setTimeout(() => openModal({ title: `测试结果 · ${ch.name}`, bodyHTML: testResultHTML(r) }), 60);
     },
   });
@@ -221,10 +221,11 @@ async function reloadMappings(ch, modal) {
   try {
     const d = await adminGet(`/channels/${ch.id}/models`, {});
     const rows = d?.list || [];
+    const existing = new Set(rows.map((m) => m.model_name));
     body.innerHTML = `
       <div class="mb-3 flex justify-end gap-2">
         <button id="map-remote" class="btn btn-ghost rounded-lg border border-zinc-800 px-3 py-1.5 text-[11px] font-semibold text-zinc-400">拉取远端模型</button>
-        <button id="map-add" class="btn btn-primary rounded-lg px-3.5 py-1.5 text-[11px] font-bold">添加映射</button>
+        <button id="map-add" class="btn btn-primary rounded-lg px-3.5 py-1.5 text-[11px] font-bold">手动添加映射</button>
       </div>
       ${rows.length ? `
         <div class="overflow-x-auto">
@@ -248,11 +249,11 @@ async function reloadMappings(ch, modal) {
                 </tr>`).join('')}
             </tbody>
           </table>
-        </div>` : `<div class="py-8 text-center text-xs text-zinc-500">暂无映射，请添加</div>`}
+        </div>` : `<div class="py-8 text-center text-xs text-zinc-500">暂无映射</div>`}
       <div id="map-remote-list" class="mt-3"></div>`;
 
     body.querySelector('#map-add').addEventListener('click', () => mappingForm(ch, null, () => channelMappings(ch)));
-    body.querySelector('#map-remote').addEventListener('click', () => remoteModels(ch, body.querySelector('#map-remote-list'), modal));
+    body.querySelector('#map-remote').addEventListener('click', () => remoteModels(ch, body.querySelector('#map-remote-list'), modal, existing));
     rows.forEach((m) => {
       body.querySelector(`[data-mid="${m.id}"][data-mact="edit"]`).addEventListener('click', () => mappingForm(ch, m, () => channelMappings(ch)));
       body.querySelector(`[data-mid="${m.id}"][data-mact="del"]`).addEventListener('click', () => Confirm(`删除映射「${m.model_name}」？`, async () => {
@@ -261,6 +262,8 @@ async function reloadMappings(ch, modal) {
         channelMappings(ch);
       }));
     });
+    // 默认自动拉取远端模型，方便一键映射（别名=真实名）
+    await remoteModels(ch, body.querySelector('#map-remote-list'), modal, existing);
   } catch (err) {
     body.innerHTML = `<div class="py-6 text-center text-xs text-rose-400">加载失败：${err.message}</div>`;
   }
@@ -269,12 +272,12 @@ async function reloadMappings(ch, modal) {
 function mappingForm(ch, m, onDone, preset) {
   const isNew = !m;
   const base = m || preset || {};
-  openModal({
+  const modal = openModal({
     title: isNew ? `添加映射 · ${ch.name}` : `编辑映射 · ${m.model_name}`,
     submitText: isNew ? '添加' : '保存',
     fields: [
-      { name: 'model_name', label: '对外模型名（网关别名）', type: 'text', value: base.model_name || '', required: isNew, help: isNew ? '下游请求使用的模型名' : '创建后不可改，如需变更请删除重建' },
-      { name: 'upstream_model', label: '上游真实模型名', type: 'text', value: base.upstream_model || '', required: true },
+      { name: 'model_name', label: '对外模型名（网关别名）', type: 'text', value: base.model_name || '', readonly: !isNew, help: isNew ? '默认与真实模型名相同；下游请求使用的模型名' : '创建后不可改，如需变更请删除重建' },
+      { name: 'upstream_model', label: '上游真实模型名', type: 'text', value: base.upstream_model || base.model_name || '', required: true },
       { name: 'enabled', label: '启用', type: 'switch', value: base.enabled ?? true },
     ],
     onSubmit: async (v) => {
@@ -287,29 +290,64 @@ function mappingForm(ch, m, onDone, preset) {
       if (onDone) onDone();
     },
   });
+  if (isNew && modal) {
+    const nameInput = modal.querySelector('[data-name="model_name"]');
+    const upInput = modal.querySelector('[data-name="upstream_model"]');
+    if (nameInput && upInput) {
+      nameInput.addEventListener('input', () => {
+        if (!upInput.dataset.touched) upInput.value = nameInput.value;
+      });
+      upInput.addEventListener('input', () => { upInput.dataset.touched = '1'; });
+    }
+  }
 }
 
-async function remoteModels(ch, container, modal) {
+async function remoteModels(ch, container, modal, existing) {
   if (!container) return;
-  container.innerHTML = `<div class="text-xs text-zinc-500">拉取中…</div>`;
+  existing = existing || new Set();
+  container.innerHTML = `<div class="text-xs text-zinc-500">拉取远端模型中…</div>`;
   try {
     const d = await adminSend('POST', `/channels/${ch.id}/remote-models`, {});
     if (!d || d.ok === false) {
-      container.innerHTML = `<div class="rounded-lg border border-rose-500/30 px-3 py-2 text-xs text-rose-400">${d?.error || '拉取失败'}</div>`;
+      container.innerHTML = `<div class="rounded-lg border border-rose-500/30 px-3 py-2 text-xs text-rose-400">${d?.error || '拉取失败（可手动添加映射）'}</div>`;
       return;
     }
     const models = d.models || [];
+    const unmapped = models.filter((x) => !existing.has(x.id));
     container.innerHTML = `
       <div class="rounded-lg border border-zinc-800 p-3">
-        <div class="mb-2 text-xs font-semibold text-zinc-300">远端模型（${models.length}）· 点击添加到映射</div>
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <div class="text-xs font-semibold text-zinc-300">远端模型（${models.length}）· 别名=真实名</div>
+          ${unmapped.length ? `<button id="map-batch" class="btn btn-primary rounded-lg px-3 py-1 text-[11px] font-bold">一键映射全部（${unmapped.length}）</button>` : ''}
+        </div>
         <div class="flex flex-wrap gap-2">
-          ${models.length ? models.map((m) => `<button data-model="${m.id}" class="btn btn-ghost rounded-lg border border-zinc-800 px-2.5 py-1 font-mono text-[11px] text-zinc-300">${m.id}</button>`).join('') : '<span class="text-xs text-zinc-500">无</span>'}
+          ${models.length ? models.map((x) => {
+            const done = existing.has(x.id);
+            return `<button data-model="${x.id}" class="btn btn-ghost rounded-lg border ${done ? 'border-emerald-400/30 text-emerald-400' : 'border-zinc-800 text-zinc-300'} px-2.5 py-1 font-mono text-[11px]" ${done ? 'disabled' : ''}>${x.id}${done ? ' ✓' : ''}</button>`;
+          }).join('') : '<span class="text-xs text-zinc-500">无</span>'}
         </div>
       </div>`;
-    container.querySelectorAll('[data-model]').forEach((b) => b.addEventListener('click', () => {
+    const batchBtn = container.querySelector('#map-batch');
+    if (batchBtn) batchBtn.addEventListener('click', () => batchMapModels(ch, unmapped.map((x) => x.id), existing, modal));
+    container.querySelectorAll('[data-model]:not([disabled])').forEach((b) => b.addEventListener('click', () => {
       mappingForm(ch, null, () => channelMappings(ch), { model_name: b.dataset.model, upstream_model: b.dataset.model, enabled: true });
     }));
   } catch (err) {
     container.innerHTML = `<div class="rounded-lg border border-rose-500/30 px-3 py-2 text-xs text-rose-400">${err.message}</div>`;
   }
+}
+
+async function batchMapModels(ch, ids, existing, modal) {
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    if (existing.has(id)) continue;
+    try {
+      await adminSend('POST', `/channels/${ch.id}/models`, { model_name: id, upstream_model: id, enabled: true });
+      ok++;
+    } catch {
+      fail++;
+    }
+  }
+  Toast(`已添加 ${ok} 个映射${fail ? ('，失败 ' + fail) : ''}`, fail ? 'error' : 'success');
+  channelMappings(ch);
 }
