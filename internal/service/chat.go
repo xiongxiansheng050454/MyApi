@@ -4,12 +4,16 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 )
 
 type ChatCompletionRequest struct {
-	Key   *KeyIdentity
-	Model string
-	Body  []byte
+	Key       *KeyIdentity
+	Model     string
+	Body      []byte
+	RequestID string
+	ClientIP  string
+	StartedAt time.Time
 }
 
 type CompletionResponse struct {
@@ -18,6 +22,7 @@ type CompletionResponse struct {
 	body        io.ReadCloser
 	release     func()
 	closeOnce   sync.Once
+	meta        *usageMeta
 }
 
 func (r *CompletionResponse) Body() io.ReadCloser { return r.body }
@@ -78,5 +83,6 @@ func (s *Service) ChatCompletion(ctx context.Context, req *ChatCompletionRequest
 		return nil, ErrNoHealthyUpstream
 	}
 	resp.addRelease(release)
+	resp.addRelease(func() { s.finalizeUsage(resp) })
 	return resp, nil
 }

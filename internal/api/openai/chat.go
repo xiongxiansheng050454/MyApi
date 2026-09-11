@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -53,7 +54,12 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 	h.log.Debug("chat completion", "user_id", ident.UserID, "api_key_id", ident.ApiKeyID, "model", model)
 
 	resp, err := h.svc.ChatCompletion(c.Request.Context(), &service.ChatCompletionRequest{
-		Key: ident, Model: model, Body: body,
+		Key:       ident,
+		Model:     model,
+		Body:      body,
+		RequestID: c.GetString("request_id"),
+		ClientIP:  c.ClientIP(),
+		StartedAt: time.Now(),
 	})
 	if err != nil {
 		writeServiceError(c, err)
