@@ -377,9 +377,45 @@ function bindInteractions() {
   document.getElementById('updated-at').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+function renderLoading() {
+  document.getElementById('bento').innerHTML = `
+    <section class="card rounded-xl border border-zinc-800 bg-zinc-900/90 p-6 col-span-12">
+      <div class="flex items-center gap-3 text-sm text-zinc-400">
+        <span class="h-2 w-2 rounded-full bg-cyan-400 dot-live text-cyan-400"></span>
+        正在连接管理端接口并加载实时数据...
+      </div>
+    </section>`;
+}
+
+function renderError(err) {
+  document.getElementById('bento').innerHTML = `
+    <section class="card rounded-xl border border-amber-400/30 bg-zinc-900/90 p-6 col-span-12">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div class="text-sm font-semibold text-amber-400">管理端接口连接失败</div>
+          <p class="mt-1 text-xs text-zinc-400">请确认网关服务已启动，且 Dashboard 与 /admin 接口同源；跨端口部署时可使用 <span class="font-mono text-cyan-400">?api_base=http://host:port/admin</span> 指定接口地址。</p>
+          <p class="mt-2 font-mono text-xs text-zinc-500">${String(err.message || err)}</p>
+        </div>
+        <button onclick="window.location.reload()" class="btn btn-primary rounded-lg px-3.5 py-2 text-xs font-bold">重新加载</button>
+      </div>
+    </section>`;
+}
+
 /* ---------- 启动 ---------- */
-renderNav();
-renderChrome();
-renderGatewayStatus();
-renderBento();
-bindInteractions();
+async function bootDashboard() {
+  renderNav();
+  renderChrome();
+  renderGatewayStatus();
+  renderLoading();
+  try {
+    await loadDashboardData();
+    document.getElementById('bento').innerHTML = '';
+    renderBento();
+    bindInteractions();
+  } catch (err) {
+    renderError(err);
+    document.getElementById('updated-at').textContent = '加载失败';
+  }
+}
+
+bootDashboard();

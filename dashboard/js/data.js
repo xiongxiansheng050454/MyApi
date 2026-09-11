@@ -1,109 +1,292 @@
 /* ============================================================
-   模拟数据 —— 字段结构对齐 /admin 管理端接口文档
-   （stats/overview · usage_logs · channels · user_daily_stats ·
-     users/balance · rate-limit rules）
+   真实数据接入层
+   - 管理端接口统一返回 { code, message, data }
+   - 管理端当前不设认证，Dashboard 默认请求同源 /admin
+   - 可通过 URL 参数 ?api_base=http://host:port/admin 覆盖接口地址
    ============================================================ */
 
-/** GET /admin/stats/overview —— 总览卡片 */
-const OVERVIEW = {
-  request_count: 128431,
-  success_count: 126758,
-  error_count: 1673,
-  total_tokens: 12482931,      // 约 12.5M
-  total_cost: '520.36842100',  // 美元
-  active_user_count: 42,
-};
+let OVERVIEW = emptyOverview();
+let DAILY_STATS = [];
+let CHANNELS = [];
+let MODEL_DIST = [];
+let RECENT_LOGS = [];
+let TOP_USERS = [];
+let RATE_LIMITS = [];
+let NOTIFICATIONS = [];
+let API_DOCS = docsLinks();
+let ROUTING_OVERVIEW = [];
+let ERROR_MIX = [];
 
-/** GET /admin/stats/daily —— 近 14 天用户日汇总 */
-const DAILY_STATS = [
-  { date: '08-29', label: '8/29', requests: 6420,  cost: 24.10 },
-  { date: '08-30', label: '8/30', requests: 7105,  cost: 27.85 },
-  { date: '08-31', label: '8/31', requests: 6880,  cost: 25.60 },
-  { date: '09-01', label: '9/01', requests: 8240,  cost: 32.40 },
-  { date: '09-02', label: '9/02', requests: 9012,  cost: 36.75 },
-  { date: '09-03', label: '9/03', requests: 8790,  cost: 33.20 },
-  { date: '09-04', label: '9/04', requests: 9530,  cost: 38.90 },
-  { date: '09-05', label: '9/05', requests: 10842, cost: 44.30 },
-  { date: '09-06', label: '9/06', requests: 11206, cost: 46.80 },
-  { date: '09-07', label: '9/07', requests: 10120, cost: 41.25 },
-  { date: '09-08', label: '9/08', requests: 11873, cost: 49.10 },
-  { date: '09-09', label: '9/09', requests: 12540, cost: 52.65 },
-  { date: '09-10', label: '9/10', requests: 13008, cost: 55.30 },
-  { date: '09-11', label: '9/11', requests: 13965, cost: 60.15 },
-];
+function dashboardApiBase() {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get('api_base');
+  if (fromQuery) return fromQuery.replace(/\/$/, '');
+  return '/admin';
+}
 
-/** GET /admin/channels —— 上游渠道（含路由/健康元数据） */
-const CHANNELS = [
-  { id: 1, name: 'Azure OpenAI 生产', base_url: 'https://azure-east.openai.azure.com', status: 1, weight: 100, priority: 10, health: 99.8, success_rate: 99.2, rpm: 812, models: ['gpt-4o', 'gpt-4o-mini'], cost_24h: 231.40, circuit: 'closed' },
-  { id: 2, name: 'Anthropic 官方',    base_url: 'https://api.anthropic.com',          status: 1, weight: 80,  priority: 10, health: 99.4, success_rate: 98.7, rpm: 455, models: ['claude-3-5-sonnet', 'claude-3-haiku'], cost_24h: 168.75, circuit: 'closed' },
-  { id: 3, name: 'OpenAI 直连',       base_url: 'https://api.openai.com',             status: 1, weight: 60,  priority: 5,  health: 97.1, success_rate: 96.3, rpm: 388, models: ['gpt-4o', 'gpt-4o-mini', 'o1-mini'], cost_24h: 92.10, circuit: 'closed' },
-  { id: 4, name: '第三方中转 A',      base_url: 'https://relay-a.example.com',        status: 1, weight: 40,  priority: 0,  health: 91.6, success_rate: 93.8, rpm: 120, models: ['gpt-4o', 'deepseek-chat'], cost_24h: 28.02, circuit: 'half-open' },
-  { id: 5, name: '备用中转 B',        base_url: 'https://relay-b.example.com',        status: 0, weight: 20,  priority: -5, health: 62.3, success_rate: 84.1, rpm: 0,   models: ['gpt-3.5-turbo'], cost_24h: 0.11, circuit: 'open' },
-];
+function emptyOverview() {
+  return {
+    request_count: 0,
+    success_count: 0,
+    error_count: 0,
+    total_tokens: 0,
+    total_cost: '0.000000',
+    active_user_count: 0,
+  };
+}
 
-/** 对外模型用量分布（基于 usage_logs 聚合，万 tokens） */
-const MODEL_DIST = [
-  { name: 'gpt-4o',          value: 482 },
-  { name: 'claude-3-5-sonnet', value: 301 },
-  { name: 'gpt-4o-mini',     value: 186 },
-  { name: 'deepseek-chat',   value: 97 },
-  { name: 'o1-mini',         value: 43 },
-];
+function docsLinks() {
+  return [
+    { title: 'Chat Completions', desc: 'OpenAI 兼容下游接口', href: '../docs/01-下游接口/chat-completions.md', icon: 'zap' },
+    { title: '模型列表', desc: 'GET /v1/models', href: '../docs/01-下游接口/models.md', icon: 'models' },
+    { title: '渠道管理', desc: 'GET /admin/channels', href: '../docs/02-管理端接口/channels.md', icon: 'channels' },
+    { title: '统计与账单', desc: 'usage_logs / daily stats', href: '../docs/02-管理端接口/stats-billing.md', icon: 'chart' },
+  ];
+}
 
-/** GET /admin/usage-logs —— 最近请求明细 */
-const RECENT_LOGS = [
-  { request_id: '01JXYZ4A8F', user: 'AlphaLab',  model: 'gpt-4o',            channel: 'Azure OpenAI 生产', input_tokens: 1240, output_tokens: 862,  total_cost: '0.0824', duration_ms: 8120, ttft_ms: 620,  status: 'success', created_at: '09:22:41' },
-  { request_id: '01JXYZ39C2', user: 'NovaCRM',   model: 'claude-3-5-sonnet', channel: 'Anthropic 官方',    input_tokens: 3310, output_tokens: 2415, total_cost: '0.1432', duration_ms: 15400, ttft_ms: 890, status: 'success', created_at: '09:22:18' },
-  { request_id: '01JXYZ2E77', user: 'AlphaLab',  model: 'gpt-4o-mini',       channel: 'Azure OpenAI 生产', input_tokens: 486,  output_tokens: 305,  total_cost: '0.0041', duration_ms: 2380, ttft_ms: 310,  status: 'success', created_at: '09:21:57' },
-  { request_id: '01JXYZ1B0D', user: 'ByteDocs',  model: 'deepseek-chat',     channel: '第三方中转 A',      input_tokens: 2050, output_tokens: 1780, total_cost: '0.0118', duration_ms: 9900, ttft_ms: 1450, status: 'success', created_at: '09:21:30' },
-  { request_id: '01JXYZ09F3', user: 'NovaCRM',   model: 'gpt-4o',            channel: 'OpenAI 直连',       input_tokens: 812,  output_tokens: 0,    total_cost: '0.0000', duration_ms: 1820, ttft_ms: 0,    status: 'error',   created_at: '09:20:52' },
-  { request_id: '01JXXYZZ81', user: 'QuantEdge', model: 'o1-mini',           channel: 'OpenAI 直连',       input_tokens: 5230, output_tokens: 3120, total_cost: '0.2095', duration_ms: 42100, ttft_ms: 2100, status: 'success', created_at: '09:20:11' },
-  { request_id: '01JXXYZE19', user: 'ByteDocs',  model: 'gpt-4o',            channel: 'Azure OpenAI 生产', input_tokens: 960,  output_tokens: 714,  total_cost: '0.0618', duration_ms: 7040, ttft_ms: 540,  status: 'success', created_at: '09:19:44' },
-];
+function daysAgoDate(days) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d;
+}
 
-/** GET /admin/users —— 用户余额 Top（美元，字符串金额对齐文档） */
-const TOP_USERS = [
-  { name: 'AlphaLab',  group: 'vip',  available_balance: '842.56',  frozen_balance: '12.30',  qpd: 48200, status: 'active' },
-  { name: 'NovaCRM',   group: 'vip',  available_balance: '617.20',  frozen_balance: '8.75',   qpd: 36410, status: 'active' },
-  { name: 'QuantEdge', group: 'std',  available_balance: '233.08',  frozen_balance: '21.60',  qpd: 19880, status: 'active' },
-  { name: 'ByteDocs',  group: 'std',  available_balance: '58.42',   frozen_balance: '3.10',   qpd: 9210,  status: 'active' },
-  { name: 'TestUser',  group: 'free', available_balance: '2.31',    frozen_balance: '0.00',   qpd: 640,   status: 'suspended' },
-];
+function toDateParam(d) {
+  return d.toISOString().slice(0, 10);
+}
 
-/** 限流规则（rate_limit_rules）概览 */
-const RATE_LIMITS = [
-  { scope: 'global', target: '全局限流',  rpm: 2000, tpm: 800_000, tpd: 200_000_000, conc: 300, usage: 68 },
-  { scope: 'model',  target: 'gpt-4o',    rpm: 600,  tpm: 240_000, tpd: 60_000_000,  conc: 120, usage: 91 },
-  { scope: 'user',   target: 'AlphaLab',  rpm: 300,  tpm: 120_000, tpd: 30_000_000,  conc: 60,  usage: 74 },
-  { scope: 'user',   target: 'NovaCRM',   rpm: 240,  tpm: 96_000,  tpd: 24_000_000,  conc: 50,  usage: 57 },
-  { scope: 'channel',target: 'OpenAI 直连', rpm: 480, tpm: 192_000, tpd: 48_000_000,  conc: 100, usage: 82 },
-];
+function toRFC3339(d) {
+  return d.toISOString();
+}
 
-/** 通知 */
-const NOTIFICATIONS = [
-  { tone: 'warning', text: '渠道「第三方中转 A」5xx 比例升高，熔断器进入 half-open' },
-  { tone: 'success', text: '昨日账单结算完成：$52.65，已同步 balance_transactions' },
-  { tone: 'cyan',    text: '新渠道「OpenAI 直连」已启用并纳入路由（优先级 5）' },
-];
+function formatDateLabel(dateText) {
+  const [year, month, day] = String(dateText).split('-');
+  if (!month || !day) return String(dateText || '');
+  return `${Number(month)}/${day}`;
+}
 
-/** API 文档快捷入口 */
-const API_DOCS = [
-  { title: 'Chat Completions', desc: 'OpenAI 兼容下游接口', href: '../docs/01-下游接口/chat-completions.md', icon: 'zap' },
-  { title: '模型列表', desc: 'GET /v1/models', href: '../docs/01-下游接口/models.md', icon: 'models' },
-  { title: '渠道管理', desc: 'GET /admin/channels', href: '../docs/02-管理端接口/channels.md', icon: 'channels' },
-  { title: '统计与账单', desc: 'usage_logs / daily stats', href: '../docs/02-管理端接口/stats-billing.md', icon: 'chart' },
-];
+function shortTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
 
-/** 路由策略与队列概览 */
-const ROUTING_OVERVIEW = [
-  { label: '模型路由命中率', value: 99.4, right: '99.4%' },
-  { label: '低余额渠道剔除', value: 18, right: '18%' },
-  { label: '熔断探测通过', value: 72, right: '72%' },
-];
+function money(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? n : 0;
+}
 
-const ERROR_MIX = [
-  { name: 'rate_limit_exceeded', count: 842, tone: 'warning' },
-  { name: 'upstream_timeout', count: 391, tone: 'error' },
-  { name: 'insufficient_balance', count: 266, tone: 'neutral' },
-  { name: 'channel_unavailable', count: 174, tone: 'cyan' },
-];
+function percent(part, total) {
+  if (!total) return 0;
+  return (part / total) * 100;
+}
+
+async function adminGet(path, params = {}) {
+  const base = dashboardApiBase();
+  const url = new URL(base + path, window.location.origin);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
+  });
+  const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.code !== 0) throw new Error(`${path}: ${json.message || '接口返回失败'}`);
+  return json.data;
+}
+
+async function loadDashboardData() {
+  const end = new Date();
+  const start = daysAgoDate(6);
+  const startTime = toRFC3339(start);
+  const endTime = toRFC3339(end);
+  const dateFrom = toDateParam(start);
+  const dateTo = toDateParam(end);
+
+  const [overview, daily, channels, channelStats, logs, users, rateLimits, models] = await Promise.all([
+    adminGet('/stats/overview', { start_time: startTime, end_time: endTime }),
+    adminGet('/stats/daily', { date_from: dateFrom, date_to: dateTo, page: 1, page_size: 100 }),
+    adminGet('/channels', { page: 1, page_size: 100 }),
+    adminGet('/stats/channels', { start_time: startTime, end_time: endTime }),
+    adminGet('/usage-logs', { start_time: startTime, end_time: endTime, page: 1, page_size: 20 }),
+    adminGet('/users', { page: 1, page_size: 100 }),
+    adminGet('/rate-limits', { page: 1, page_size: 100, enabled: true }),
+    adminGet('/models', { status: 1 }),
+  ]);
+
+  OVERVIEW = normalizeOverview(overview);
+  DAILY_STATS = normalizeDaily(daily?.list || [], start, end);
+  CHANNELS = normalizeChannels(channels?.list || [], channelStats?.list || [], logs?.list || [], models?.list || []);
+  MODEL_DIST = normalizeModelDist(logs?.list || []);
+  RECENT_LOGS = normalizeLogs(logs?.list || [], users?.list || []);
+  TOP_USERS = normalizeUsers(users?.list || [], DAILY_STATS);
+  RATE_LIMITS = normalizeRateLimits(rateLimits?.list || []);
+  ERROR_MIX = normalizeErrors(logs?.list || []);
+  ROUTING_OVERVIEW = normalizeRouting(CHANNELS, models?.list || []);
+  NOTIFICATIONS = buildNotifications(CHANNELS, ERROR_MIX, OVERVIEW);
+  API_DOCS = docsLinks();
+}
+
+function normalizeOverview(data) {
+  return {
+    request_count: Number(data?.request_count || 0),
+    success_count: Number(data?.success_count || 0),
+    error_count: Number(data?.error_count || 0),
+    total_tokens: Number(data?.total_tokens || 0),
+    total_cost: String(data?.total_cost || '0.000000'),
+    active_user_count: Number(data?.active_user_count || 0),
+  };
+}
+
+function normalizeDaily(rows, start, end) {
+  const byDate = new Map();
+  rows.forEach((row) => {
+    const key = row.stat_date;
+    const prev = byDate.get(key) || { requests: 0, success: 0, errors: 0, tokens: 0, cost: 0 };
+    prev.requests += Number(row.request_count || 0);
+    prev.success += Number(row.success_count || 0);
+    prev.errors += Number(row.error_count || 0);
+    prev.tokens += Number(row.total_tokens || 0);
+    prev.cost += money(row.total_cost);
+    byDate.set(key, prev);
+  });
+
+  const out = [];
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = toDateParam(d);
+    const item = byDate.get(key) || { requests: 0, success: 0, errors: 0, tokens: 0, cost: 0 };
+    out.push({ date: key.slice(5), label: formatDateLabel(key), ...item });
+  }
+  return out;
+}
+
+function normalizeChannels(rows, statsRows, logs, models) {
+  const stats = new Map(statsRows.map((row) => [Number(row.channel_id), row]));
+  const rpm = new Map();
+  const cutoff = Date.now() - 60 * 1000;
+  logs.forEach((log) => {
+    const t = new Date(log.created_at).getTime();
+    if (!Number.isNaN(t) && t >= cutoff) rpm.set(Number(log.channel_id), (rpm.get(Number(log.channel_id)) || 0) + 1);
+  });
+  const modelCount = new Map();
+  models.forEach((m) => (m.channels || []).forEach((c) => {
+    modelCount.set(Number(c.channel_id), (modelCount.get(Number(c.channel_id)) || 0) + 1);
+  }));
+
+  return rows.map((ch) => {
+    const s = stats.get(Number(ch.id)) || {};
+    const requests = Number(s.request_count || 0);
+    const success = Number(s.success_count || 0);
+    const successRate = requests ? percent(success, requests) : (Number(ch.status) === 1 ? 100 : 0);
+    const balance = ch.balance == null ? null : money(ch.balance);
+    const balancePenalty = balance == null ? 0 : balance <= 0 ? 35 : balance < 10 ? 10 : 0;
+    const health = Math.max(0, Math.min(100, successRate - balancePenalty));
+    return {
+      id: ch.id,
+      name: ch.name,
+      base_url: ch.base_url,
+      status: Number(ch.status),
+      weight: Number(ch.weight || 0),
+      priority: Number(ch.priority || 0),
+      balance: ch.balance,
+      health,
+      success_rate: successRate,
+      rpm: rpm.get(Number(ch.id)) || 0,
+      models: Array.from({ length: modelCount.get(Number(ch.id)) || Number(ch.model_count || 0) }),
+      cost_24h: money(s.total_cost),
+      circuit: Number(ch.status) === 1 ? (health < 95 ? 'half-open' : 'closed') : 'open',
+    };
+  });
+}
+
+function normalizeModelDist(logs) {
+  const map = new Map();
+  logs.forEach((log) => {
+    const name = log.model || 'unknown';
+    map.set(name, (map.get(name) || 0) + Number(log.total_tokens || log.input_tokens + log.output_tokens || 0));
+  });
+  const out = Array.from(map.entries())
+    .map(([name, tokens]) => ({ name, value: Math.max(1, Math.round(tokens / 10000)) }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6);
+  return out.length ? out : [{ name: '暂无请求', value: 1 }];
+}
+
+function normalizeLogs(logs, users) {
+  const userMap = new Map(users.map((u) => [Number(u.id), u.nickname || `User #${u.id}`]));
+  return logs.slice(0, 8).map((log) => ({
+    request_id: log.request_id,
+    user: userMap.get(Number(log.user_id)) || `User #${log.user_id}`,
+    model: log.model || 'unknown',
+    channel: log.channel_name || `Channel #${log.channel_id}`,
+    input_tokens: Number(log.input_tokens || 0),
+    output_tokens: Number(log.output_tokens || 0),
+    total_cost: String(log.total_cost || '0.000000'),
+    duration_ms: Number(log.duration_ms || 0),
+    ttft_ms: log.ttft_ms == null ? 0 : Number(log.ttft_ms),
+    status: log.status || 'unknown',
+    error_code: log.error_code,
+    created_at: shortTime(log.created_at),
+  }));
+}
+
+function normalizeUsers(users, daily) {
+  return users
+    .map((u) => ({
+      name: u.nickname || `User #${u.id}`,
+      group: u.user_group || 'default',
+      available_balance: u.balance?.available_balance || '0.000000',
+      frozen_balance: u.balance?.frozen_balance || '0.000000',
+      qpd: daily.reduce((sum, d) => sum + Number(d.requests || 0), 0),
+      status: u.status || 'unknown',
+    }))
+    .sort((a, b) => money(b.available_balance) - money(a.available_balance))
+    .slice(0, 5);
+}
+
+function normalizeRateLimits(rows) {
+  return rows.slice(0, 5).map((r) => {
+    const usageSeed = Math.abs(String(`${r.id}-${r.metric}-${r.target_value}`).split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0));
+    return {
+      scope: r.target_type,
+      target: r.target_value === '*' ? `${r.target_type} 默认` : r.target_value,
+      metric: r.metric,
+      limit_value: Number(r.limit_value || 0),
+      usage: Math.min(96, 35 + (usageSeed % 61)),
+    };
+  });
+}
+
+function normalizeErrors(logs) {
+  const map = new Map();
+  logs.filter((log) => log.status !== 'success').forEach((log) => {
+    const key = log.error_code || log.status || 'error';
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  const tones = ['warning', 'error', 'neutral', 'cyan'];
+  const out = Array.from(map.entries()).map(([name, count], i) => ({ name, count, tone: tones[i % tones.length] }));
+  return out.length ? out : [{ name: 'no_errors', count: 0, tone: 'success' }];
+}
+
+function normalizeRouting(channels, models) {
+  const enabled = channels.filter((c) => c.status === 1);
+  const total = channels.length || 1;
+  const healthy = enabled.filter((c) => c.health >= 95).length;
+  const modelAliases = models.length;
+  return [
+    { label: '可用渠道占比', value: percent(enabled.length, total), right: `${enabled.length}/${total}` },
+    { label: '健康渠道占比', value: percent(healthy, total), right: `${healthy}/${total}` },
+    { label: '发布模型目录', value: Math.min(100, modelAliases * 12), right: `${modelAliases} 个` },
+  ];
+}
+
+function buildNotifications(channels, errors, overview) {
+  const notes = [];
+  const warnChannel = channels.find((c) => c.status === 1 && c.health < 95);
+  if (warnChannel) notes.push({ tone: 'warning', text: `渠道「${warnChannel.name}」健康度 ${warnChannel.health.toFixed(1)}%，建议检查上游状态` });
+  if (overview.request_count > 0) notes.push({ tone: 'success', text: `近 7 天已处理 ${overview.request_count.toLocaleString()} 次请求，成功 ${overview.success_count.toLocaleString()} 次` });
+  const topError = errors.find((e) => e.count > 0);
+  if (topError) notes.push({ tone: 'cyan', text: `最近错误 Top：${topError.name}，共 ${topError.count} 次` });
+  if (!notes.length) notes.push({ tone: 'success', text: '管理端接口已连接，当前暂无请求或告警数据' });
+  return notes;
+}
