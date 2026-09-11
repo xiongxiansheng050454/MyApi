@@ -1,0 +1,7 @@
+Web 框架：gin
+日志系统：slog
+关系型数据库：PostgreSQL
+ORM / SQL 生成器：gorm
+分布式缓存与状态存储：Redis
+熔断与降级：gobreaker
+分布式限流：go-redis/redis_rate/v9
