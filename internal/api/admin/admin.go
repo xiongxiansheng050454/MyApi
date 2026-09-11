@@ -32,6 +32,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/users/:userId", h.getUser)
 	rg.PUT("/users/:userId", h.updateUser)
 	rg.PUT("/users/:userId/status", h.setUserStatus)
+	rg.DELETE("/users/:userId", h.deleteUser)
 	rg.GET("/users/:userId/balance", h.getUserBalance)
 	rg.POST("/users/:userId/recharge", h.recharge)
 	rg.GET("/users/:userId/balance-transactions", h.listBalanceTransactions)

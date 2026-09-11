@@ -23,9 +23,14 @@ async function renderUsersView() {
   await loadUsers(1);
 
   const keysCard = Card('col-span-12', `
-    ${CardHeader({ title: '网关 Key', desc: 'client_api_keys · 仅存哈希，明文仅下发一次' })}
+    ${CardHeader({
+      title: '网关 Key',
+      desc: 'client_api_keys · 仅存哈希，明文仅下发一次',
+      action: `<button id="k-refresh" class="btn btn-ghost rounded-lg border border-zinc-800 px-3 py-1.5 text-[11px] font-semibold text-zinc-400">刷新</button>`,
+    })}
     <div id="k-list" class="py-10 text-center text-xs text-zinc-500">加载中…</div>`);
   bento.append(keysCard);
+  document.getElementById('k-refresh').addEventListener('click', loadKeys);
   await loadKeys();
 }
 
@@ -220,10 +225,11 @@ function toggleUser(user) {
 }
 
 function deleteUser(user) {
-  Confirm(`确认删除用户 #${user.id}？（逻辑删除，历史账单保留）`, async () => {
-    await adminSend('PUT', `/users/${user.id}/status`, { status: 'deleted' });
-    Toast('用户已删除', 'success');
+  Confirm(`确认永久删除用户 #${user.id}？将同时删除其网关 Key、余额、资金流水、用量日志与日汇总，且不可恢复。如需保留数据请改用「停用」。`, async () => {
+    await adminSend('DELETE', `/users/${user.id}`);
+    Toast('用户已永久删除', 'success');
     loadUsers(USER_PAGE);
+    loadKeys();
   });
 }
 
@@ -340,20 +346,81 @@ function showFullKey(fullKey, onDone) {
   modal.querySelector('#copy-key').addEventListener('click', () => copyText(fullKey, 'Key 已复制'));
 }
 
-/* ---------- 全局 Key 列表 ---------- */
+/* ---------- 全局 Key 列表（可管理） ---------- */
+let KEY_CACHE = [];
+
 async function loadKeys() {
   const node = document.getElementById('k-list');
   if (!node) return;
   try {
-    const d = await adminGet('/keys', { page: 1, page_size: 20 });
+    const d = await adminGet('/keys', { page: 1, page_size: 50 });
     const rows = d?.list || [];
+    KEY_CACHE = rows;
     node.innerHTML = '';
     if (rows.length) {
-      node.innerHTML = keysTableHTML(rows);
+      node.innerHTML = keysAdminTableHTML(rows);
+      bindKeyActions();
     } else {
       node.append(EmptyState({ title: '暂无 Key', desc: '在上方用户行点击「Key」创建', icon: 'key' }));
     }
   } catch (err) {
     node.innerHTML = `<div class="py-10 text-center text-xs text-rose-400">加载失败：${err.message}</div>`;
   }
+}
+
+function keysAdminTableHTML(rows) {
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead>
+          <tr class="border-b border-zinc-800 text-[11px] uppercase tracking-wide text-zinc-500">
+            <th class="pb-2.5 pr-3 font-medium">名称</th>
+            <th class="pb-2.5 pr-3 font-medium">用户</th>
+            <th class="pb-2.5 pr-3 font-medium">前缀</th>
+            <th class="pb-2.5 pr-3 font-medium">状态</th>
+            <th class="pb-2.5 pr-3 font-medium">最后使用</th>
+            <th class="pb-2.5 font-medium text-right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((k) => `
+            <tr class="row-hover border-b border-zinc-800/50" data-krow="${k.id}">
+              <td class="py-2.5 pr-3 font-semibold">${k.key_name}</td>
+              <td class="py-2.5 pr-3 text-zinc-400">#${k.user_id}</td>
+              <td class="py-2.5 pr-3 font-mono text-[10px] text-zinc-500">${k.prefix}</td>
+              <td class="py-2.5 pr-3">${k.is_active ? Badge('启用', 'success') : Badge('停用', 'neutral')}</td>
+              <td class="py-2.5 pr-3 font-mono text-[10px] text-zinc-500">${k.last_used_at ? shortTime(k.last_used_at) : '—'}</td>
+              <td class="py-2.5 text-right whitespace-nowrap">
+                <button data-kact="reset" class="btn btn-ghost rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">重置</button>
+                <button data-kact="toggle" class="btn btn-ghost rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">${k.is_active ? '停用' : '启用'}</button>
+                <button data-kact="del" class="btn btn-ghost rounded-md border border-rose-500/30 px-2 py-1 text-[11px] text-rose-400">删除</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function bindKeyActions() {
+  document.querySelectorAll('#k-list tr[data-krow]').forEach((tr) => {
+    const id = Number(tr.dataset.krow);
+    const k = KEY_CACHE.find((x) => x.id === id);
+    if (!k) return;
+    tr.querySelector('[data-kact="reset"]').addEventListener('click', () => Confirm(`重置 Key「${k.key_name}」？旧 Key 将立即失效。`, async () => {
+      const out = await adminSend('POST', `/users/${k.user_id}/keys/${k.id}/reset`, {});
+      showFullKey(out?.full_key, loadKeys);
+    }));
+    tr.querySelector('[data-kact="toggle"]').addEventListener('click', async () => {
+      try {
+        await adminSend('PUT', `/users/${k.user_id}/keys/${k.id}`, { is_active: !k.is_active });
+        Toast('状态已更新', 'success');
+        loadKeys();
+      } catch (e) { Toast(e.message, 'error'); }
+    });
+    tr.querySelector('[data-kact="del"]').addEventListener('click', () => Confirm(`永久删除 Key「${k.key_name}」？`, async () => {
+      await adminSend('DELETE', `/users/${k.user_id}/keys/${k.id}`);
+      Toast('Key 已删除', 'success');
+      loadKeys();
+    }));
+  });
 }

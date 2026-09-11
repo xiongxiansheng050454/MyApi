@@ -348,6 +348,56 @@ func (h *Handler) setUserStatus(c *gin.Context) {
 	OK(c, gin.H{"id": id, "status": req.Status})
 }
 
+// deleteUser 永久删除用户及其关联数据（Key / 余额 / 流水 / 用量日志 / 日汇总）。
+func (h *Handler) deleteUser(c *gin.Context) {
+	id, ok := idParam(c, "userId")
+	if !ok {
+		return
+	}
+	db, ok := h.db(c)
+	if !ok {
+		return
+	}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", id).Delete(&model.ClientApiKey{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&model.UserBalance{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&model.BalanceTransaction{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&model.UserDailyStat{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&model.UsageLog{}).Error; err != nil {
+			return err
+		}
+		res := tx.Delete(&model.User{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			Fail(c, CodeUserNotFound, "用户不存在")
+			return
+		}
+		h.log.Error("delete user", "err", err)
+		Fail(c, CodeInternal, "删除用户失败")
+		return
+	}
+	if h.svc != nil {
+		h.svc.InvalidateBalance(context.Background(), id)
+	}
+	OK(c, gin.H{"id": id})
+}
+
 type balanceOut struct {
 	AvailableBalance string `json:"available_balance"`
 	FrozenBalance    string `json:"frozen_balance"`

@@ -56,9 +56,14 @@ services:
       MYAPI_DB_SSLMODE: disable
       MYAPI_DB_AUTO_MIGRATE: "true"
       MYAPI_REDIS_ADDR: redis:6379
+      # 上游 api_key 加密密钥：可选。留空时容器会在 /app/data 自动生成并持久化。
+      MYAPI_APIKEY_ENC_KEY: ${MYAPI_APIKEY_ENC_KEY:-}
     ports:
       - "8080:8080"
+    volumes:
+      - appdata:/app/data
 
 volumes:
   pgdata:
   redisdata:
+  appdata:

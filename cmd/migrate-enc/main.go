@@ -30,7 +30,7 @@ func run(cfgPath string, dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	sec, err := secret.FromEnv()
+	sec, _, err := secret.FromEnvOrFile(cfg.Security.APIKeyEncKeyFile)
 	if err != nil {
 		return err
 	}

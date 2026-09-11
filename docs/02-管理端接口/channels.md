@@ -57,7 +57,7 @@
 ```
 
 > `api_key` 永不明文回显，只提供掩码 `api_key_masked`（保留末 4 位）。
-> **存储**：`api_key` 以 `enc:v1:` 前缀密文入库（AES-256-GCM，密钥取环境变量 `MYAPI_APIKEY_ENC_KEY`，不落库/不落 git）；仅在调用上游时解密、用完清零。历史明文行需先执行 `cmd/migrate-enc`（严格迁移，未迁移会返回错误）。
+> **存储**：`api_key` 以 `enc:v1:` 前缀密文入库（AES-256-GCM）。加密密钥优先取环境变量 `MYAPI_APIKEY_ENC_KEY`；未设置时使用 `security.api_key_enc_key_file`（默认 `data/apikey_enc.key`），文件不存在会**自动生成并持久化**（需保证目录可写，容器已挂载 `appdata:/app/data`）。密钥不落库/不入 git；仅在调用上游时解密、用完清零。历史明文行需先执行 `cmd/migrate-enc`（严格迁移，未迁移会返回错误）。
 
 ### 1.2 渠道列表
 

@@ -62,6 +62,10 @@ stats:
   timezone: "UTC"            # 统计自然日时区
   redis_ttl_hours: 168       # 增量键 TTL
 
+security:
+  # 上游 api_key 加密密钥文件；环境变量 MYAPI_APIKEY_ENC_KEY 优先；文件不存在会自动生成并持久化
+  api_key_enc_key_file: "data/apikey_enc.key"
+
 log:
   level: info            # debug / info / warn / error
   format: text           # text / json
