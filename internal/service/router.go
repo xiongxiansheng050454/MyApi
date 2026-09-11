@@ -163,7 +163,7 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 
 	var stickyID int64
 	if s.affinity != nil && s.cfg.Routing.StickyEnabled {
-		if id, ok, err := s.affinity.Get(ctx, req.Key.UserID, req.Model); err == nil && ok {
+		if id, ok, err := s.affinity.Get(ctx, s.affinityScope(req)); err == nil && ok {
 			stickyID = id
 		}
 	}
@@ -206,7 +206,7 @@ func (s *Service) routeAndForward(ctx context.Context, req *ChatCompletionReques
 			resp, sent, retryable, ferr := s.forwardOnce(ctx, req, handle, info, upstreamName)
 			if ferr == nil {
 				resp.meta.reserve = res
-				s.setAffinity(ctx, req.Key.UserID, req.Model, info.ID)
+				s.setAffinity(ctx, req, info.ID)
 				return resp, nil
 			}
 			handle.Done()
@@ -275,12 +275,12 @@ func (s *Service) settleFailedAttempt(ctx context.Context, req *ChatCompletionRe
 	s.addUsageDelta(req.Key.UserID, input, 0, 0, actualMicro, false, id)
 }
 
-func (s *Service) setAffinity(ctx context.Context, uid int64, model string, channelID int64) {
+func (s *Service) setAffinity(ctx context.Context, req *ChatCompletionRequest, channelID int64) {
 	if s.affinity == nil || !s.cfg.Routing.StickyEnabled {
 		return
 	}
 	ttl := time.Duration(s.cfg.Routing.StickyTTLSeconds) * time.Second
-	if err := s.affinity.Set(ctx, uid, model, channelID, ttl); err != nil {
+	if err := s.affinity.Set(ctx, s.affinityScope(req), channelID, ttl); err != nil {
 		s.log.Debug("set affinity failed", "err", err)
 	}
 }

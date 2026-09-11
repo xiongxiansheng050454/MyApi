@@ -14,6 +14,7 @@ type ChatCompletionRequest struct {
 	RequestID string
 	ClientIP  string
 	StartedAt time.Time
+	SessionID string
 }
 
 type CompletionResponse struct {
@@ -124,7 +125,7 @@ func (s *Service) ChatCompletionStream(ctx context.Context, req *ChatCompletionR
 
 	var stickyID int64
 	if s.affinity != nil && s.cfg.Routing.StickyEnabled {
-		if id, ok, err := s.affinity.Get(ctx, req.Key.UserID, req.Model); err == nil && ok {
+		if id, ok, err := s.affinity.Get(ctx, s.affinityScope(req)); err == nil && ok {
 			stickyID = id
 		}
 	}
@@ -216,7 +217,7 @@ func (s *Service) ChatCompletionStream(ctx context.Context, req *ChatCompletionR
 
 			if rerr == nil {
 				s.finalizeMeta(meta)
-				s.setAffinity(ctx, req.Key.UserID, req.Model, info.ID)
+				s.setAffinity(ctx, req, info.ID)
 				return nil
 			}
 			if written {
