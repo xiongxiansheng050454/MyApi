@@ -51,6 +51,14 @@ func mountStatic(engine *gin.Engine, log *slog.Logger, urlPath, dir string) {
 		log.Warn("static dir not found, skip mount", "url", urlPath, "dir", dir)
 		return
 	}
-	engine.Static(urlPath, dir)
+	handler := http.StripPrefix(urlPath, http.FileServer(http.Dir(dir)))
+	serve := func(c *gin.Context) {
+		// 开发/升级友好：静态资源强制协商缓存，避免旧文件被浏览器长期缓存
+		c.Header("Cache-Control", "no-cache, must-revalidate")
+		handler.ServeHTTP(c.Writer, c.Request)
+	}
+	engine.GET(urlPath, func(c *gin.Context) { c.Redirect(http.StatusFound, urlPath+"/") })
+	engine.GET(urlPath+"/*filepath", serve)
+	engine.HEAD(urlPath+"/*filepath", serve)
 	log.Info("static mounted", "url", urlPath, "dir", dir)
 }
