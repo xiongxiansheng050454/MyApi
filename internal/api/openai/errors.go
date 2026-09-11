@@ -58,6 +58,9 @@ func writeServiceError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrQueueTimeout):
 		writeRateLimitError(c, "engine_overloaded", "server_error",
 			"The request has been waiting too long in the queue.", 0)
+	case errors.Is(err, service.ErrInsufficientBalance):
+		writeOpenAIError(c, http.StatusTooManyRequests, "insufficient_quota", "insufficient_quota",
+			"You exceeded your current quota, please check your balance.")
 	case errors.Is(err, service.ErrStoreDown):
 		writeOpenAIError(c, http.StatusServiceUnavailable, "internal_error", "server_error", "Gateway backend unavailable.")
 	case errors.Is(err, service.ErrNotImplemented):

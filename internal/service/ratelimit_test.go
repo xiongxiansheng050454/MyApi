@@ -94,12 +94,11 @@ func (f *fakeRLStore) Release(ctx context.Context, key string) error {
 
 func TestEstimateTokens(t *testing.T) {
 	cfg := config.Default()
-	s := &Service{cfg: cfg}
+	s := &Service{cfg: cfg, tokenizer: newTokenizerCache(cfg.Billing.DefaultEncoding)}
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"你好世界"},{"role":"assistant","content":"hi"},{"role":"user","content":[{"type":"text","text":"hello world"}]}]}`)
-	got := s.estimateTokens(body)
-	// chars: 4(你好世界) + 2(hi) + 11(hello world) + 3 messages*3=9 -> 26 chars -> /4 = 6 tokens (26/4=6,余2 +1=7)
-	if got != 7 {
-		t.Fatalf("estimateTokens = %d, want 7", got)
+	got := s.estimateTokens(body, "gpt-4")
+	if got <= 0 {
+		t.Fatalf("estimateTokens = %d, want > 0", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -462,6 +463,9 @@ func (h *Handler) recharge(c *gin.Context) {
 			Fail(c, CodeInternal, "充值失败")
 		}
 		return
+	}
+	if h.svc != nil {
+		h.svc.InvalidateBalance(context.Background(), id)
 	}
 	OK(c, txOut)
 }
