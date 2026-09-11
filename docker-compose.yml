@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: myapi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: myapi
+      TZ: UTC
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d myapi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: myapi-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  myapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GOPROXY: "https://goproxy.cn,direct"
+    image: myapi:dev
+    container_name: myapi
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      MYAPI_SERVER_MODE: release
+      MYAPI_DB_HOST: postgres
+      MYAPI_DB_PORT: "5432"
+      MYAPI_DB_USER: postgres
+      MYAPI_DB_PASSWORD: postgres
+      MYAPI_DB_NAME: myapi
+      MYAPI_DB_SSLMODE: disable
+      MYAPI_DB_AUTO_MIGRATE: "true"
+      MYAPI_REDIS_ADDR: redis:6379
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
+  redisdata:
