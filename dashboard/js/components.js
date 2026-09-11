@@ -290,7 +290,7 @@ function renderForm(fields) {
     } else if (f.type === 'switch') {
       input = `<label class="inline-flex items-center gap-2"><input id="${id}" data-name="${f.name}" type="checkbox" class="form-switch" ${f.value ? 'checked' : ''}/><span class="text-xs text-zinc-400">${f.switchLabel || '启用'}</span></label>`;
     } else {
-      input = `<input id="${id}" data-name="${f.name}" type="${f.type || 'text'}" value="${f.value ?? ''}" class="form-input" placeholder="${f.placeholder || ''}"/>`;
+      input = `<input id="${id}" data-name="${f.name}" type="${f.type || 'text'}" value="${f.value ?? ''}" class="form-input ${f.readonly ? 'opacity-60' : ''}" placeholder="${f.placeholder || ''}" ${f.readonly ? 'readonly' : ''}/>`;
     }
     return `<label class="block"><span class="mb-1 block text-xs font-medium text-zinc-400">${f.label}${f.required ? ' <span class="text-rose-400">*</span>' : ''}</span>${input}${f.help ? `<span class="mt-1 block text-[10px] text-zinc-500">${f.help}</span>` : ''}</label>`;
   }).join('') + `</div>`;
