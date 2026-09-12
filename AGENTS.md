@@ -79,7 +79,7 @@ MyApi 是面向 LLM 的 **API 网关 / 统一接入层**。对下游暴露 OpenA
 - `usage_logs`：逐请求用量明细
 - `user_daily_stats`：用户 × 日期 的用量与费用汇总
 
-表结构以 GORM 模型 `internal/model/*.go` 为准（`AutoMigrate` 或建库 SQL）。
+表结构以 GORM 模型 `internal/model/*.go` 为准；生产环境手动建表脚本见 `migrations/0001_init.sql`（开发环境可用 `AutoMigrate`）。
 
 ## 6. 安全不变量
 
