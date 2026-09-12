@@ -7,12 +7,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"MyApi/internal/api/middleware"
 	"MyApi/internal/config"
-	"MyApi/internal/service"
+	"MyApi/internal/middleware"
+	"MyApi/internal/store"
 )
 
-func New(cfg *config.Config, svc *service.Service, log *slog.Logger) *gin.Engine {
+func New(cfg *config.Config, st *store.Store, log *slog.Logger) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 
 	engine := gin.New()
@@ -20,16 +20,15 @@ func New(cfg *config.Config, svc *service.Service, log *slog.Logger) *gin.Engine
 
 	engine.GET("/healthz", func(c *gin.Context) {
 		status := "ok"
-		if svc.DB == nil {
+		if st == nil || st.DB == nil {
 			status = "degraded:no_db"
 		}
-		if svc.Redis == nil {
+		if st == nil || st.Redis == nil {
 			status = "degraded:no_redis"
 		}
 		c.JSON(http.StatusOK, gin.H{"status": status})
 	})
 
-	// 静态前端控制台（dashboard/）与接口文档（docs/）
 	mountStatic(engine, log, "/dashboard", cfg.Server.DashboardDir)
 	mountStatic(engine, log, "/docs", cfg.Server.DocsDir)
 	if cfg.Server.DashboardDir != "" {
@@ -53,7 +52,6 @@ func mountStatic(engine *gin.Engine, log *slog.Logger, urlPath, dir string) {
 	}
 	handler := http.StripPrefix(urlPath, http.FileServer(http.Dir(dir)))
 	serve := func(c *gin.Context) {
-		// 开发/升级友好：静态资源强制协商缓存，避免旧文件被浏览器长期缓存
 		c.Header("Cache-Control", "no-cache, must-revalidate")
 		handler.ServeHTTP(c.Writer, c.Request)
 	}

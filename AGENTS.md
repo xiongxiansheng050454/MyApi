@@ -30,6 +30,24 @@ MyApi 是面向 LLM 的 **API 网关 / 统一接入层**。对下游暴露 OpenA
 | M6 用量统计与计费 | 用量与费用如何计量与呈现 | 用量明细、日汇总、结算结果 | 请求转发、路由、定价维护 |
 | M7 管理控制台 | 运营方如何可视化管理与查看 | 管理视图、文档阅读 | 绕过模块读写数据、参与转发与计费 |
 
+### 代码包结构
+
+| 层 | 包 | 职责 |
+| --- | --- | --- |
+| 边缘 | `internal/handler/{openai,admin}` | HTTP 绑定与协议映射，保持薄 |
+| 编排 | `internal/gateway` | 用例编排（`Chat` / `ChatStream` / `Models`） |
+| 协议 | `internal/protocol/openai` | OpenAI DTO、SSE 解码、body 改写、错误输出 |
+| 业务域 | `internal/{auth,ratelimit,routing,upstream,pricing,billing,usage,catalog,channel,user}` | 各自业务规则 |
+| 运行时 | `internal/channelmanager` | 渠道快照、引用计数与熔断 |
+| 公共 | `internal/platform/{cachekeys,money,tokenizer,httpx,apperr}` | 无业务依赖的工具 |
+| 基础设施 | `internal/{config,logger,secret,store,model,middleware,router}` | 连接、配置、路由注册 |
+
+依赖只能向下：`handler → gateway → 业务域 → platform/channelmanager/store/model`。
+
+- 业务域包**不得 import** `protocol/openai`；OpenAI 协议字段只允许出现在 `protocol/openai` 与 `handler/openai`。
+- 所有路由集中在 `internal/router/routes.go` 一处注册，handler 不再自带 `Register`。
+- Redis 键统一由 `platform/cachekeys` 构造；金额换算统一用 `platform/money`。
+
 ### 模块协作约束（硬规则）
 
 - 模块之间只能通过明确的命令、查询结果或事件传递数据。
