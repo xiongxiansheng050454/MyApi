@@ -57,25 +57,6 @@ MyApi 是面向 LLM 的 **API 网关 / 统一接入层**。对下游暴露 OpenA
 - 账户余额与资金流水只允许下游管理修改；鉴权与配额、计费通过命令请求冻结、扣减与解冻。
 - 路由决策只允许模型路由模块产生；接入层与配额模块不得自行选择渠道。
 
-### 关键事件
-
-事件只表达「已经发生的事实」，不表达命令，命名格式 `[领域].[事实]`：
-
-| 事件 | 产生 | 消费 | 事实 |
-| --- | --- | --- | --- |
-| `gateway.request_received` | 接入 | 配额 | 收到一次下游调用 |
-| `auth.key_validated` | 下游管理 | 接入 / 配额 | 网关 Key 校验通过 |
-| `quota.reservation_granted` | 配额 | 接入 / 路由 | 已通过限速并预冻结 |
-| `quota.limit_exceeded` | 配额 | 接入 | 命中限速或余额不足 |
-| `routing.channel_selected` | 路由 | 接入 / 渠道 | 已选定健康渠道 |
-| `channel.health_changed` | 路由 | 控制台 | 渠道健康状态变化 |
-| `channel.circuit_opened` | 路由 | 渠道 / 控制台 | 渠道被熔断 |
-| `upstream.request_completed` | 接入 | 计费 | 上游调用结束并产生 usage |
-| `billing.settlement_completed` | 计费 | 下游管理 / 控制台 | 完成费用结算 |
-| `account.balance_changed` | 下游管理 | 配额 / 计费 / 控制台 | 账户余额变化 |
-| `channel.config_changed` | 渠道 | 路由 / 控制台 | 渠道或映射变化 |
-| `pricing.updated` | 渠道 | 计费 / 控制台 | 单价更新 |
-
 ## 4. 配置与状态位置
 
 | 位置 | 归属 | 保存内容 | 是否进入版本控制 |
